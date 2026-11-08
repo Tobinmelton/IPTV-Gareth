@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G-IPTV Mockup 02 — VHS OSD</title>
+<style>
+  /* ============ MOCKUP 02 : VHS / CRT OSD ============
+     Raw camcorder/VCR on-screen display. Black void, green phosphor
+     mono text, blue VIDEO 1 TV, tracking glitches. */
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body {
+    font-family:"Courier New", Courier, monospace;
+    background:#050505; color:#e8e8e8; overflow:hidden;
+    display:flex; flex-direction:column;
+    text-transform:uppercase;
+  }
+  body::after { /* global faint scanlines */
+    content:""; position:fixed; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px);
+    z-index:50;
+  }
+
+  .osd { color:#7dff9a; text-shadow:0 0 6px rgba(125,255,154,.7), 2px 0 0 rgba(255,0,60,.35), -2px 0 0 rgba(0,120,255,.35); }
+
+  /* ---- top OSD strip ---- */
+  .topbar {
+    display:flex; justify-content:space-between; padding:8px 18px;
+    font-size:14px; letter-spacing:2px;
+  }
+  .blink { animation:blink 1.2s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  .stage { flex:1; display:flex; gap:18px; padding:10px 18px; min-height:0; }
+
+  /* ---- TOP-LEFT : description as camcorder data screen ---- */
+  .infocard {
+    width:44%; border:1px dashed #3a5a3a; padding:16px 18px;
+    display:flex; flex-direction:column; gap:10px;
+    background:rgba(10,20,10,.4);
+  }
+  .infocard .big { font-size:34px; font-weight:bold; letter-spacing:3px; }
+  .infocard .label { font-size:11px; color:#4d7a4d; letter-spacing:3px; }
+  .infocard h1 { font-size:17px; letter-spacing:1px; color:#e8e8e8; text-shadow:1px 1px 0 #000; }
+  .infocard p { font-size:12px; line-height:1.7; color:#b9d8b9; }
+  .tc {
+    margin-top:auto; font-size:22px; letter-spacing:3px; color:#fff;
+    border-top:1px dashed #3a5a3a; padding-top:10px;
+    font-variant-numeric:tabular-nums;
+  }
+  .tc small { font-size:11px; color:#4d7a4d; display:block; letter-spacing:2px; }
+
+  /* ---- TOP-RIGHT : TV showing blue VIDEO 1 screen w/ content ---- */
+  .tvwrap { flex:1; display:flex; align-items:flex-start; justify-content:center; }
+  .tv {
+    width:100%; max-width:560px;
+    background:#111; border:2px solid #2c2c2c; border-radius:6px;
+    padding:14px; box-shadow:0 0 0 4px #000, 0 10px 24px rgba(0,0,0,.8);
+  }
+  .screen {
+    position:relative; aspect-ratio:4/3; overflow:hidden; border-radius:4px;
+    background:radial-gradient(ellipse at center,#1c46c8 0%,#122c86 70%,#0a1a52 100%);
+  }
+  .screen .noise {
+    position:absolute; inset:0; opacity:.10;
+    background:repeating-conic-gradient(#fff 0 .0001%,#000 .0002% .0003%);
+    background-size:130px 130px; animation:static .18s steps(4) infinite;
+  }
+  @keyframes static { to { background-position:40px 90px; } }
+  .screen .video1 {
+    position:absolute; top:14px; left:16px; font-size:26px; font-weight:bold; color:#fff;
+    letter-spacing:2px; text-shadow:3px 3px 0 rgba(0,0,0,.35);
+  }
+  .screen .src { position:absolute; top:48px; left:16px; font-size:13px; color:#cfe0ff; }
+  .screen .preview {
+    position:absolute; inset:70px 40px 40px;
+    border:2px solid rgba(255,255,255,.65);
+    background:
+      repeating-linear-gradient(0deg,rgba(0,0,0,.3) 0 2px,transparent 2px 4px),
+      linear-gradient(135deg,#3a6ea8 0%,#274a77 40%,#16294a 100%);
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; font-size:13px; letter-spacing:2px; text-align:center; padding:0 10px;
+  }
+  .screen .track { /* tracking tear */
+    position:absolute; left:0; right:0; height:9px; top:32%;
+    background:rgba(255,255,255,.35); filter:blur(1px);
+    animation:track 4s linear infinite; mix-blend-mode:screen;
+  }
+  @keyframes track { 0%{top:-4%;} 100%{top:104%;} }
+  .screen .corner { position:absolute; bottom:10px; right:14px; font-size:12px; color:#fff; }
+
+  /* ---- BOTTOM : guide as plain-text EPG ---- */
+  .guide {
+    height:34%; min-height:170px; margin:0 18px 16px;
+    border:1px dashed #3a5a3a; padding:12px 16px; overflow:hidden;
+    font-size:12.5px; line-height:1.9; background:rgba(10,20,10,.4);
+    display:flex; flex-direction:column;
+  }
+  .guide .gtitle { color:#4d7a4d; letter-spacing:3px; font-size:11px; margin-bottom:6px; }
+  .guide table { width:100%; border-collapse:collapse; }
+  .guide td { padding:1px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:0; }
+  .guide .t { color:#4d7a4d; }
+  .guide .selrow { background:#7dff9a; color:#051505; font-weight:bold; text-shadow:none; }
+  .guide .now { color:#fff; }
+</style>
+</head>
+<body>
+
+  <div class="topbar osd">
+    <span>▶ PLAY&nbsp;&nbsp;SP</span>
+    <span class="blink">● REC — CH 002 LIVE FEED</span>
+    <span>NOV&nbsp;08&nbsp;1994&nbsp;&nbsp;07:42&nbsp;PM</span>
+  </div>
+
+  <div class="stage">
+    <!-- TOP-LEFT -->
+    <section class="infocard osd">
+      <div class="label">CHANNEL DATA SCREEN</div>
+      <div class="big">CH·001</div>
+      <div class="label">TAPE VAULT</div>
+      <h1>Beach Trip '94 (Digitized VHS)</h1>
+      <p>
+        HI8 MASTER · SP MODE · STEREO HI-FI.<br>
+        FAMILY VACATION, OUTER BANKS NC. SANDCASTLE CONTEST,
+        CAMCORDER NARRATION, THE SEAGULL INCIDENT.<br>
+        TRACKING: AUTO · TAPE REMAIN 1:46:12
+      </p>
+      <div class="tc osd">
+        <small>TIME COUNTER</small>
+        0:14:32&nbsp;&nbsp;▸&nbsp;&nbsp;REM&nbsp;0:45:28
+      </div>
+    </section>
+
+    <!-- TOP-RIGHT -->
+    <div class="tvwrap">
+      <div class="tv">
+        <div class="screen">
+          <div class="noise"></div>
+          <div class="video1">VIDEO 1</div>
+          <div class="src">G-IPTV NETWORK — S-VHS INPUT</div>
+          <div class="preview">CH 001 · TAPE VAULT<br>«BEACH TRIP '94»</div>
+          <div class="track"></div>
+          <div class="corner">HI-FI&nbsp;&nbsp;◄◄&nbsp;▶&nbsp;►►</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM -->
+  <section class="guide">
+    <div class="gtitle">ELECTRONIC PROGRAM GUIDE — PRESS ▲▼ TO SURF</div>
+    <table>
+      <tr class="t"><td>CH</td><td>7:00 PM</td><td>7:30 PM</td><td>8:00 PM</td><td>8:30 PM</td></tr>
+      <tr class="selrow"><td>001 TAPE VAULT</td><td>GARAGE BAND '98</td><td>▶ BEACH TRIP '94</td><td>CHRISTMAS 1997</td><td>GRANDMA'S 70TH</td></tr>
+      <tr><td>002 HOUSE CAM</td><td>FRONT PORCH ●</td><td class="now">LIVING ROOM ●</td><td>LIVING ROOM ●</td><td>BACKYARD ●</td></tr>
+    </table>
+  </section>
+
+</body>
+</html>

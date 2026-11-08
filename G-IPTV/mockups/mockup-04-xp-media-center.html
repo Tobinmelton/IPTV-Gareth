@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G-IPTV Mockup 04 — XP Media Center</title>
+<style>
+  /* ============ MOCKUP 04 : XP MEDIA CENTER ============
+     2002–2005 living-room PC era: glossy green orb, Luna blues,
+     soft rolling-hill gradients, Tahoma UI. */
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body {
+    font-family: Tahoma, "Segoe UI", Verdana, sans-serif;
+    background:
+      radial-gradient(ellipse at 50% 120%, #7ec850 0%, #4a9a30 26%, transparent 55%),
+      linear-gradient(180deg,#7db9e8 0%,#3d7ec2 40%,#1d4e96 100%);
+    color:#fff; overflow:hidden; display:flex; flex-direction:column;
+  }
+
+  /* ---- header ---- */
+  .topbar { display:flex; align-items:center; gap:14px; padding:10px 20px; }
+  .orb {
+    width:44px; height:44px; border-radius:50%;
+    background:radial-gradient(circle at 32% 28%, #d6ffb0 0%, #6cc724 38%, #3d8a10 72%, #2c6a08 100%);
+    box-shadow:inset 0 3px 6px rgba(255,255,255,.8), inset 0 -4px 8px rgba(0,60,0,.5), 0 3px 10px rgba(0,0,0,.45);
+    display:flex; align-items:center; justify-content:center; font-size:20px; color:#fff;
+    text-shadow:0 1px 3px rgba(0,60,0,.8); font-weight:bold;
+  }
+  .topbar h1 { font-size:22px; font-weight:normal; text-shadow:0 2px 4px rgba(0,30,70,.7); }
+  .topbar h1 b { font-weight:bold; }
+  .clock { margin-left:auto; font-size:13px; text-shadow:0 1px 3px rgba(0,30,70,.7); }
+
+  .stage { flex:1; display:flex; gap:18px; padding:8px 20px 12px; min-height:0; }
+
+  /* ---- TOP-LEFT : frosted info panel ---- */
+  .infocard {
+    width:44%; border-radius:12px; padding:16px 18px;
+    background:linear-gradient(180deg,rgba(255,255,255,.28),rgba(20,50,110,.35));
+    border:1px solid rgba(255,255,255,.55);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.7), 0 6px 18px rgba(0,20,60,.45);
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .infocard .eyebrow { font-size:10px; letter-spacing:2px; color:#eaf6d0; }
+  .infocard .chanline { font-size:15px; font-weight:bold; text-shadow:0 1px 2px rgba(0,30,70,.8); }
+  .infocard .chanline span { color:#d6ffb0; }
+  .infocard h2 { font-size:24px; font-weight:normal; text-shadow:0 2px 4px rgba(0,30,70,.7); }
+  .infocard .meta { font-size:11px; color:#dcecff; }
+  .infocard p { font-size:12.5px; line-height:1.6; color:#f2f8ff; }
+  .actions { margin-top:auto; display:flex; gap:10px; }
+  .gbtn {
+    padding:7px 16px; border-radius:16px; font-size:12px; font-weight:bold; border:1px solid rgba(255,255,255,.6);
+    background:linear-gradient(180deg,#ffffff 0%,#bfe3ff 45%,#5aa2e0 55%,#2b7cc8 100%);
+    color:#0a2a55; text-shadow:0 1px 0 #fff; box-shadow:0 2px 6px rgba(0,20,60,.4), inset 0 1px 0 #fff;
+    display:flex; align-items:center; gap:6px;
+  }
+  .gbtn.green { background:linear-gradient(180deg,#f2ffd8 0%,#c4ee8a 45%,#79c92e 55%,#4a9a10 100%); color:#123d00; }
+
+  /* ---- TOP-RIGHT : glossy media-center TV ---- */
+  .tvwrap { flex:1; display:flex; align-items:flex-start; justify-content:center; }
+  .tv {
+    width:100%; max-width:560px; border-radius:16px; padding:14px 14px 30px; position:relative;
+    background:linear-gradient(180deg,#4c5560 0%,#23282e 55%,#0e1114 100%);
+    box-shadow:inset 0 2px 3px rgba(255,255,255,.35), 0 10px 24px rgba(0,10,40,.6);
+  }
+  .screen { position:relative; aspect-ratio:4/3; border-radius:8px; overflow:hidden; background:#000; box-shadow:inset 0 0 0 2px #000; }
+  .scene {
+    position:absolute; inset:0;
+    background:
+      radial-gradient(ellipse at 50% 115%, #8ad050 0%, #4f9c2e 30%, transparent 60%),
+      radial-gradient(circle at 78% 18%, #fff8c8 0%, transparent 18%),
+      linear-gradient(180deg,#6db3ec 0%,#3f83c9 55%,#2a5f9e 100%);
+  }
+  .scene::after { content:""; position:absolute; left:10%; right:10%; bottom:22%; height:2px;
+    background:rgba(255,255,255,.5); box-shadow:0 6px 0 rgba(255,255,255,.25), 0 12px 0 rgba(255,255,255,.12); }
+  .screen .scan { position:absolute; inset:0; background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 2px,transparent 2px 4px); }
+  .screen .glare { position:absolute; top:0; left:0; width:60%; height:45%;
+    background:linear-gradient(135deg,rgba(255,255,255,.22),transparent 70%); }
+  .osd {
+    position:absolute; left:0; right:0; bottom:0; padding:10px 14px;
+    background:linear-gradient(180deg,transparent,rgba(0,20,50,.75));
+    display:flex; justify-content:space-between; align-items:flex-end;
+  }
+  .osd .t { font-size:13px; font-weight:bold; text-shadow:0 1px 2px #000; }
+  .osd .t small { display:block; font-weight:normal; font-size:10px; color:#cfe4ff; }
+  .osd .live { font-size:10px; font-weight:bold; color:#fff; background:#d63b2a; padding:2px 8px; border-radius:8px; box-shadow:0 0 8px rgba(255,60,30,.8); }
+  .tv .chin { position:absolute; bottom:8px; left:0; right:0; text-align:center; font-size:9px; letter-spacing:3px; color:#9aa4ae; }
+
+  /* ---- BOTTOM : guide ---- */
+  .guide {
+    height:34%; min-height:170px; margin:0 20px 16px; border-radius:12px; overflow:hidden;
+    background:linear-gradient(180deg,rgba(255,255,255,.25),rgba(15,40,95,.4));
+    border:1px solid rgba(255,255,255,.55);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.6), 0 6px 18px rgba(0,20,60,.45);
+    display:flex; flex-direction:column;
+  }
+  .ghead, .row { display:grid; grid-template-columns:170px repeat(4,1fr); }
+  .ghead {
+    background:linear-gradient(180deg,#fdfdfd 0%,#cfe1f5 50%,#9dbfe4 100%); color:#1d3f78;
+    font-size:11px; font-weight:bold;
+  }
+  .ghead .cell { border-color:rgba(255,255,255,.7); }
+  .cell {
+    padding:8px 12px; font-size:12px; border-right:1px solid rgba(255,255,255,.35);
+    border-bottom:1px solid rgba(255,255,255,.35); white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; display:flex; align-items:center;
+  }
+  .row { flex:1; }
+  .chan { flex-direction:column; align-items:flex-start; justify-content:center; gap:1px;
+    background:linear-gradient(180deg,rgba(255,255,255,.18),rgba(15,40,95,.25)); }
+  .chan b { font-size:14px; color:#d6ffb0; text-shadow:0 1px 2px rgba(0,30,70,.8); }
+  .chan small { font-size:9px; letter-spacing:2px; color:#dcecff; }
+  .sel {
+    background:linear-gradient(180deg,#fff6c8 0%,#ffe082 45%,#ffb52e 55%,#f09000 100%) !important;
+    color:#4a2c00; font-weight:bold; box-shadow:inset 0 0 0 2px rgba(255,255,255,.9); border-radius:6px; margin:3px; padding:5px 9px;
+  }
+  .onair { color:#d6ffb0; font-weight:bold; }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="orb">▶</div>
+    <h1><b>G-IPTV</b> Media Center <span style="font-size:12px;opacity:.8">— home edition</span></h1>
+    <div class="clock">7:42 PM&nbsp;&nbsp;Saturday, November 08</div>
+  </div>
+
+  <div class="stage">
+    <!-- TOP-LEFT -->
+    <section class="infocard">
+      <div class="eyebrow">NOW PLAYING</div>
+      <div class="chanline">Channel <span>001</span> · TAPE VAULT</div>
+      <h2>Beach Trip '94 (Digitized VHS)</h2>
+      <div class="meta">Home Movie · 1994 · Rated TV-G · 30 minutes · Stereo</div>
+      <p>
+        Newly digitized Hi8 footage from the family's Outer Banks vacation — the sandcastle
+        contest, Dad's camcorder narration, and the infamous seagull incident, all preserved
+        from the original SP-mode master tape.
+      </p>
+      <div class="actions">
+        <span class="gbtn green">▶ Watch Now</span>
+        <span class="gbtn">＋ Record</span>
+        <span class="gbtn">ⓘ More Info</span>
+      </div>
+    </section>
+
+    <!-- TOP-RIGHT -->
+    <div class="tvwrap">
+      <div class="tv">
+        <div class="screen">
+          <div class="scene"></div>
+          <div class="scan"></div>
+          <div class="glare"></div>
+          <div class="osd">
+            <div class="t">Beach Trip '94<small>CH 001 · TAPE VAULT</small></div>
+            <div class="live">● LIVE</div>
+          </div>
+        </div>
+        <div class="chin">G-MEDIA FLAT PANEL · MODEL XP-2002</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM -->
+  <section class="guide">
+    <div class="ghead">
+      <div class="cell">CHANNEL</div><div class="cell">7:00 PM</div>
+      <div class="cell">7:30 PM</div><div class="cell">8:00 PM</div><div class="cell">8:30 PM</div>
+    </div>
+    <div class="row">
+      <div class="cell chan"><b>001</b><small>TAPE VAULT</small></div>
+      <div class="cell">Garage Band Recital '98</div>
+      <div class="cell sel">▶ Beach Trip '94</div>
+      <div class="cell">Christmas Morning 1997</div>
+      <div class="cell">Grandma's 70th Birthday</div>
+    </div>
+    <div class="row">
+      <div class="cell chan"><b>002</b><small>HOUSE CAM</small></div>
+      <div class="cell">Front Porch — Live</div>
+      <div class="cell onair">● Living Room — Live</div>
+      <div class="cell">Living Room — Live</div>
+      <div class="cell">Backyard — Live</div>
+    </div>
+  </section>
+
+</body>
+</html>

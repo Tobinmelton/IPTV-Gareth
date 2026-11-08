@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G-IPTV Mockup 01 Rev A — Cable Box 2003</title>
+<style>
+  /* ============ MOCKUP 01 REV A : CABLE BOX 2003 ============
+     Based on Mockup 01 (selected). Changes in Rev A:
+       - TV screen enlarged (4:3 ratio preserved), info card narrowed
+       - Guide channel column narrowed (mockup-02 style)
+       - All type enlarged for 10-foot readability */
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body {
+    font-family: Verdana, Geneva, sans-serif;
+    background: linear-gradient(180deg,#0a1440 0%,#122a6e 55%,#0a1440 100%);
+    color:#fff; overflow:hidden;
+    display:flex; flex-direction:column;
+  }
+
+  /* ---- top strip : clock + branding ---- */
+  .topbar {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 18px; font-size:16px; letter-spacing:1px;
+    background:linear-gradient(180deg,#2b4aa8,#16296b);
+    border-bottom:2px solid #4d6fd1;
+    text-shadow:1px 1px 0 #000;
+  }
+  .topbar .brand { font-weight:bold; color:#ffd94d; }
+  .topbar .clock { font-variant-numeric:tabular-nums; }
+
+  /* ---- middle area : description + TV ---- */
+  .stage { flex:1; display:flex; gap:14px; padding:14px 16px; min-height:0; }
+
+  .infocard {
+    width:33%;
+    background:linear-gradient(180deg,#27439c 0%,#152a70 100%);
+    border:2px solid #5c7fe0; border-radius:10px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.35), 0 4px 10px rgba(0,0,0,.5);
+    padding:18px 20px; display:flex; flex-direction:column; gap:10px;
+  }
+  .infocard .channum {
+    font-size:46px; font-weight:bold; color:#ffd94d; text-shadow:2px 2px 0 #000;
+  }
+  .infocard .channame { font-size:19px; letter-spacing:3px; color:#9fc0ff; }
+  .infocard h1 { font-size:30px; margin-top:6px; text-shadow:1px 1px 0 #000; }
+  .infocard .meta { font-size:15px; color:#c9d8ff; display:flex; gap:12px; }
+  .infocard p.desc { font-size:18px; line-height:1.55; color:#eaf0ff; margin-top:6px; }
+  .progress { margin-top:auto; }
+  .progress .bar { height:10px; border:1px solid #5c7fe0; border-radius:5px; background:#0a1440; overflow:hidden; }
+  .progress .fill { height:100%; width:38%; background:linear-gradient(90deg,#ffd94d,#ff9d2e); }
+  .progress .times { display:flex; justify-content:space-between; font-size:14px; color:#9fc0ff; margin-top:4px; }
+  .badges { display:flex; gap:6px; margin-top:6px; }
+  .badge {
+    font-size:12px; padding:4px 10px; border-radius:4px; letter-spacing:1px;
+    background:#0a1440; border:1px solid #5c7fe0; color:#ffd94d;
+  }
+
+  /* ---- TV : silver CRT bezel ---- */
+  .tvwrap { flex:1; display:flex; align-items:flex-start; justify-content:center; }
+  .tv {
+    width:100%; max-width:780px;
+    background:linear-gradient(180deg,#d7dbe0 0%,#9aa1a9 50%,#6d747d 100%);
+    border-radius:18px; padding:18px 18px 40px;
+    box-shadow:inset 0 2px 3px #fff, inset 0 -3px 6px rgba(0,0,0,.4), 0 8px 18px rgba(0,0,0,.6);
+    position:relative;
+  }
+  .tv .screen {
+    position:relative; aspect-ratio:4/3; border-radius:14px/18px; overflow:hidden;
+    background:#000; border:3px solid #3a3f45;
+    box-shadow:inset 0 0 40px #000;
+  }
+  /* fake broadcast : color bars drifting + static */
+  .screen .broadcast {
+    position:absolute; inset:0;
+    background:linear-gradient(90deg,#c8c8c8 0 14%,#c8c800 14% 28%,#00c8c8 28% 42%,#00c800 42% 56%,#c800c8 56% 70%,#c80000 70% 84%,#0000c8 84% 100%);
+    filter:saturate(.7) brightness(.75);
+    animation:drift 9s linear infinite;
+  }
+  @keyframes drift { 0%{transform:scale(1.05) translateX(0);} 50%{transform:scale(1.12) translateX(-6px);} 100%{transform:scale(1.05) translateX(0);} }
+  .screen .scanlines {
+    position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.35) 0 2px,transparent 2px 4px);
+    mix-blend-mode:multiply;
+  }
+  .screen .vignette { position:absolute; inset:0; box-shadow:inset 0 0 60px 24px rgba(0,0,0,.75); border-radius:inherit; }
+  .screen .osd {
+    position:absolute; top:12px; left:14px; font-size:18px; font-weight:bold;
+    color:#fff; text-shadow:1px 1px 0 #000; letter-spacing:1px;
+  }
+  .screen .live {
+    position:absolute; top:12px; right:14px; font-size:14px; font-weight:bold;
+    background:#c80000; padding:3px 10px; border-radius:3px; box-shadow:0 0 8px #c80000;
+  }
+  .screen .bug {
+    position:absolute; bottom:12px; right:14px; font-size:13px; letter-spacing:1px;
+    background:rgba(0,0,0,.55); padding:3px 8px; border-radius:3px; color:#ffd94d;
+  }
+  .tv .brandplate {
+    position:absolute; bottom:11px; left:0; right:0; text-align:center;
+    font-size:13px; letter-spacing:5px; color:#3a3f45; font-weight:bold; text-shadow:0 1px 0 rgba(255,255,255,.6);
+  }
+  .tv .led { position:absolute; bottom:12px; right:26px; width:7px; height:7px; border-radius:50%; background:#37ff6a; box-shadow:0 0 6px #37ff6a; }
+
+  /* ---- guide ---- */
+  .guide {
+    height:34%; min-height:220px; margin:0 16px 14px;
+    background:linear-gradient(180deg,#1c37a0,#101f5e);
+    border:2px solid #5c7fe0; border-radius:8px; overflow:hidden;
+    display:flex; flex-direction:column;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.25), 0 4px 10px rgba(0,0,0,.5);
+  }
+  .guide .ghead {
+    display:grid; grid-template-columns:96px repeat(4,1fr);
+    background:linear-gradient(180deg,#3f5fc0,#243f92); font-size:15px; font-weight:bold;
+    border-bottom:2px solid #5c7fe0; text-shadow:1px 1px 0 #000;
+  }
+  .guide .row { display:grid; grid-template-columns:96px repeat(4,1fr); font-size:18px; flex:1; }
+  .guide .cell {
+    border-right:1px solid #3d55a8; border-bottom:1px solid #3d55a8;
+    padding:8px 10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    display:flex; align-items:center;
+  }
+  .guide .chan { flex-direction:column; align-items:flex-start; justify-content:center; gap:1px;
+    background:linear-gradient(180deg,#2b4aa8,#1a2f78); font-weight:bold; }
+  .guide .chan .num { color:#ffd94d; font-size:22px; }
+  .guide .chan .name { font-size:10px; color:#c9d8ff; letter-spacing:0; }
+  .guide .sel {
+    background:linear-gradient(180deg,#ffe57a,#ffb62e) !important; color:#101f5e; font-weight:bold;
+    outline:2px solid #fff; outline-offset:-2px; text-shadow:none;
+  }
+  .guide .now { color:#ffd94d; font-weight:bold; }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <span class="brand">◆ G-IPTV DIGITAL CABLE</span>
+    <span>GUIDE ▸ STEP 1 FRAMEWORK — 2 CHANNELS</span>
+    <span class="clock">SAT&nbsp;&nbsp;NOV 08&nbsp;&nbsp;7:42 PM</span>
+  </div>
+
+  <div class="stage">
+    <!-- TOP-LEFT : channel description -->
+    <section class="infocard">
+      <div class="channum">CH 001</div>
+      <div class="channame">TAPE VAULT</div>
+      <h1>Beach Trip '94 (Digitized VHS)</h1>
+      <div class="meta"><span>1994</span><span>•</span><span>Home Movie</span><span>•</span><span>TV-G</span><span>•</span><span>CC</span></div>
+      <p class="desc">
+        Newly digitized Hi8 footage from the family's Outer Banks vacation. Includes the
+        sandcastle contest, Dad's camcorder narration, and the infamous seagull incident.
+        Transferred from the original tape in SP mode.
+      </p>
+      <div class="badges"><span class="badge">HI8 TRANSFER</span><span class="badge">STEREO</span><span class="badge">4:3</span></div>
+      <div class="progress">
+        <div class="bar"><div class="fill"></div></div>
+        <div class="times"><span>7:30 PM</span><span>NOW PLAYING</span><span>8:00 PM</span></div>
+      </div>
+    </section>
+
+    <!-- TOP-RIGHT : retro TV -->
+    <div class="tvwrap">
+      <div class="tv">
+        <div class="screen">
+          <div class="broadcast"></div>
+          <div class="scanlines"></div>
+          <div class="vignette"></div>
+          <div class="osd">▶ PLAY&nbsp;&nbsp;SP&nbsp;&nbsp;0:14:32</div>
+          <div class="live">● LIVE</div>
+          <div class="bug">G-IPTV 1</div>
+        </div>
+        <div class="brandplate">TRINITRONY &nbsp;KV-27GTV</div>
+        <div class="led"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM : guide -->
+  <section class="guide">
+    <div class="ghead">
+      <div class="cell">CH</div>
+      <div class="cell">7:00 PM</div><div class="cell">7:30 PM</div>
+      <div class="cell">8:00 PM</div><div class="cell">8:30 PM</div>
+    </div>
+    <div class="row">
+      <div class="cell chan"><span class="num">001</span><span class="name">TAPE VAULT</span></div>
+      <div class="cell">Garage Band Recital '98</div>
+      <div class="cell sel">▶ Beach Trip '94</div>
+      <div class="cell">Christmas Morning 1997</div>
+      <div class="cell">Grandma's 70th Birthday</div>
+    </div>
+    <div class="row">
+      <div class="cell chan"><span class="num">002</span><span class="name">HOUSE CAM</span></div>
+      <div class="cell">Front Porch — Live</div>
+      <div class="cell now">● Living Room — Live</div>
+      <div class="cell">Living Room — Live</div>
+      <div class="cell">Backyard — Live</div>
+    </div>
+  </section>
+
+</body>
+</html>

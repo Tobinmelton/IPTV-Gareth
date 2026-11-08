@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G-IPTV — UI Mockup Gallery</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:"Segoe UI", Verdana, sans-serif;
+    background:#101218; color:#e6e9f2; min-height:100%;
+  }
+  header { padding:28px 34px 10px; }
+  header h1 { font-size:26px; font-weight:600; }
+  header p { color:#9aa3b8; margin-top:6px; max-width:70ch; line-height:1.6; font-size:13.5px; }
+  .hint { color:#ffcf7a; }
+
+  .grid {
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(560px,1fr));
+    gap:26px; padding:22px 34px 40px;
+  }
+  .card {
+    background:#171a22; border:1px solid #262b38; border-radius:12px; overflow:hidden;
+    box-shadow:0 8px 24px rgba(0,0,0,.4);
+  }
+  .card .head { padding:14px 18px 6px; display:flex; align-items:baseline; gap:12px; }
+  .card .head b { font-size:16px; }
+  .card .head span { font-size:11px; color:#9aa3b8; }
+  .card .tags { padding:0 18px 12px; display:flex; flex-wrap:wrap; gap:6px; }
+  .tag {
+    font-size:10px; letter-spacing:1px; padding:3px 9px; border-radius:999px;
+    background:#232838; color:#aeb7cc; border:1px solid #323a4e; text-transform:uppercase;
+  }
+  .framebox { position:relative; width:100%; aspect-ratio:16/10; background:#000; overflow:hidden; }
+  iframe {
+    width:200%; height:200%; border:0; transform:scale(.5); transform-origin:0 0;
+    pointer-events:none; /* click-through disabled in preview; open full page to interact */
+  }
+  .open {
+    display:block; text-align:center; padding:10px; font-size:12px; font-weight:bold;
+    color:#0b0d12; background:#ffcf7a; text-decoration:none; letter-spacing:1px;
+  }
+  .open:hover { background:#ffe0a8; }
+
+  footer { padding:0 34px 40px; color:#9aa3b8; font-size:12.5px; line-height:1.8; max-width:90ch; }
+  footer h2 { color:#e6e9f2; font-size:16px; margin-bottom:8px; }
+  footer code { background:#232838; padding:1px 6px; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📺 G-IPTV — UI Mockup Gallery</h1>
+  <p>
+    Six candidates, all sharing the mandated layout:
+    <b>channel description (top-left) · retro TV screen (top-right) · program guide (bottom)</b>.
+    Fake data only — 2 channels (<code style="background:#232838;padding:1px 6px;border-radius:4px">001 TAPE VAULT</code> /
+    <code style="background:#232838;padding:1px 6px;border-radius:4px">002 HOUSE CAM</code>).
+    <span class="hint">Open each full-screen, note the elements you like from each,
+    and we'll blend them into the final design.</span>
+  </p>
+</header>
+
+<div class="grid">
+
+  <div class="card">
+    <div class="head"><b>01 · Cable Box 2003</b><span>Scientific-Atlanta / Comcast EPG</span></div>
+    <div class="tags">
+      <span class="tag">Blue gradient grid</span><span class="tag">Yellow selection</span>
+      <span class="tag">Silver CRT bezel</span><span class="tag">Progress bar</span>
+      <span class="tag">Channel logos row</span><span class="tag">Clock header</span>
+    </div>
+    <div class="framebox"><iframe src="mockup-01-cable-box-2003.html" title="Mockup 01"></iframe></div>
+    <a class="open" href="mockup-01-cable-box-2003.html" target="_blank">OPEN FULL SCREEN ↗</a>
+  </div>
+
+  <div class="card">
+    <div class="head"><b>01 REV A · Cable Box 2003</b><span>Superseded by Rev B</span></div>
+    <div class="tags">
+      <span class="tag">Base: mockup 01</span><span class="tag">TV enlarged (4:3 kept)</span>
+      <span class="tag">Narrow CH column (mockup 02 style)</span><span class="tag">10-foot type sizes</span>
+    </div>
+    <div class="framebox"><iframe src="mockup-01-rev-a.html" title="Mockup 01 Rev A"></iframe></div>
+    <a class="open" href="mockup-01-rev-a.html" target="_blank">OPEN FULL SCREEN ↗</a>
+  </div>
+
+  <div class="card">
+    <div class="head"><b>01 REV B · Cable Box 2003 — SELECTED</b><span>Current working design</span></div>
+    <div class="tags">
+      <span class="tag">Base: rev a</span><span class="tag">TV fills its panel (4:3 kept)</span>
+      <span class="tag">Guide rows narrowed + centered</span><span class="tag">10-foot type sizes</span>
+    </div>
+    <div class="framebox"><iframe src="mockup-01-rev-b.html" title="Mockup 01 Rev B"></iframe></div>
+    <a class="open" href="mockup-01-rev-b.html" target="_blank">OPEN FULL SCREEN ↗</a>
+  </div>
+
+  <div class="card">
+    <div class="head"><b>02 · VHS OSD</b><span>Camcorder / VCR on-screen display</span></div>
+    <div class="tags">
+      <span class="tag">Green phosphor mono</span><span class="tag">PLAY ▶ / REC ●</span>
+      <span class="tag">Blue VIDEO 1 screen</span><span class="tag">Time counter</span>
+      <span class="tag">Tracking tear</span><span class="tag">Text-mode guide</span>
+    </div>
+    <div class="framebox"><iframe src="mockup-02-vhs-osd.html" title="Mockup 02"></iframe></div>
+    <a class="open" href="mockup-02-vhs-osd.html" target="_blank">OPEN FULL SCREEN ↗</a>
+  </div>
+
+  <div class="card">
+    <div class="head"><b>03 · Y2K Chrome</b><span>Millennium liquid-metal futurism</span></div>
+    <div class="tags">
+      <span class="tag">Chrome bezel</span><span class="tag">Cyan / lime pills</span>
+      <span class="tag">Glass panels</span><span class="tag">Equalizer animation</span>
+      <span class="tag">Italic numerals</span><span class="tag">ON AIR chip</span>
+    </div>
+    <div class="framebox"><iframe src="mockup-03-y2k-chrome.html" title="Mockup 03"></iframe></div>
+    <a class="open" href="mockup-03-y2k-chrome.html" target="_blank">OPEN FULL SCREEN ↗</a>
+  </div>
+
+  <div class="card">
+    <div class="head"><b>04 · XP Media Center</b><span>2002 living-room PC</span></div>
+    <div class="tags">
+      <span class="tag">Green orb</span><span class="tag">Glossy action buttons</span>
+      <span class="tag">Frosted panels</span><span class="tag">Bliss-style scene</span>
+      <span class="tag">Amber selection</span><span class="tag">Friendly type</span>
+    </div>
+    <div class="framebox"><iframe src="mockup-04-xp-media-center.html" title="Mockup 04"></iframe></div>
+    <a class="open" href="mockup-04-xp-media-center.html" target="_blank">OPEN FULL SCREEN ↗</a>
+  </div>
+
+  <div class="card">
+    <div class="head"><b>05 · Pixel Console TV</b><span>8-bit / woodgrain cabinet</span></div>
+    <div class="tags">
+      <span class="tag">Woodgrain TV</span><span class="tag">Animated static</span>
+      <span class="tag">Chunky pixel borders</span><span class="tag">Channel knobs</span>
+      <span class="tag">Blinking selection</span><span class="tag">Hi-score clock</span>
+    </div>
+    <div class="framebox"><iframe src="mockup-05-pixel-console.html" title="Mockup 05"></iframe></div>
+    <a class="open" href="mockup-05-pixel-console.html" target="_blank">OPEN FULL SCREEN ↗</a>
+  </div>
+
+  <div class="card">
+    <div class="head"><b>06 · Midnight VFD</b><span>Modern dark + hi-fi amber display</span></div>
+    <div class="tags">
+      <span class="tag">Amber VFD glow</span><span class="tag">Minimal dark UI</span>
+      <span class="tag">16:9 screen</span><span class="tag">Thin timeline</span>
+      <span class="tag">Subtle scanlines</span><span class="tag">Most buildable</span>
+    </div>
+    <div class="framebox"><iframe src="mockup-06-midnight-vfd.html" title="Mockup 06"></iframe></div>
+    <a class="open" href="mockup-06-midnight-vfd.html" target="_blank">OPEN FULL SCREEN ↗</a>
+  </div>
+
+</div>
+
+<footer>
+  <h2>How to pick</h2>
+  For each mockup, call out: <b>keep / drop / tweak</b> on (a) TV bezel &amp; screen treatment,
+  (b) info panel density, (c) guide style &amp; selection color, (d) typography, (e) motion effects.
+  Practical note: <b>06</b> is the easiest to build responsively and later wrap as an APK;
+  <b>01</b> is the most authentically "2000s cable"; <b>02</b> and <b>05</b> are the most
+  thematic but hardest to read at distance. Hybrids welcome — e.g. 06's structure with
+  01's yellow-highlight guide and 05's static-on-TV.
+</footer>
+
+</body>
+</html>

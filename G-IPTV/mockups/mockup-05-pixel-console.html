@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G-IPTV Mockup 05 — Pixel Console TV</title>
+<style>
+  /* ============ MOCKUP 05 : PIXEL CONSOLE TV ============
+     Chunky 8-bit frame, woodgrain console television, bright
+     cartridge-era palette, animated static. */
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body {
+    font-family:"Courier New", monospace; font-weight:bold;
+    background:#1a0f2e; overflow:hidden; display:flex; flex-direction:column;
+    image-rendering:pixelated; text-transform:uppercase; letter-spacing:1px;
+  }
+
+  .px { position:relative; }
+  .px::after { /* chunky pixel border */
+    content:""; position:absolute; inset:0; pointer-events:none;
+    box-shadow:inset 0 0 0 4px #000, inset 0 0 0 8px currentColor;
+  }
+
+  /* ---- header : marquee ---- */
+  .topbar {
+    background:#e040fb; color:#fff; padding:10px 16px; display:flex; justify-content:space-between;
+    font-size:16px; text-shadow:2px 2px 0 #000; border-bottom:6px solid #000;
+  }
+  .topbar .blinky { color:#fffc40; animation:blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  .stage { flex:1; display:flex; gap:16px; padding:16px; min-height:0; background:
+    repeating-linear-gradient(90deg,#1a0f2e 0 24px,#221341 24px 48px); }
+
+  /* ---- TOP-LEFT : info cartridge ---- */
+  .infocard {
+    width:44%; background:#2a1a4e; color:#fff; padding:18px 20px 14px;
+    display:flex; flex-direction:column; gap:10px; color:#efe6ff;
+  }
+  .infocard.px { color:#2a1a4e; } .infocard { background:#2a1a4e; }
+  .infocard .tag {
+    align-self:flex-start; background:#fffc40; color:#000; padding:3px 10px; font-size:11px;
+    box-shadow:4px 4px 0 #000;
+  }
+  .infocard .chan { font-size:26px; color:#40e0ff; text-shadow:3px 3px 0 #000; }
+  .infocard h1 { font-size:16px; color:#fffc40; text-shadow:2px 2px 0 #000; line-height:1.5; }
+  .infocard .meta { font-size:10px; color:#e040fb; }
+  .infocard p { font-size:11px; line-height:1.8; color:#c9b8f0; font-weight:normal; }
+  .hearts { font-size:14px; letter-spacing:3px; }
+  .infocard .sel-ind {
+    margin-top:auto; background:#000; color:#37ff6a; padding:8px 10px; font-size:11px;
+    box-shadow:inset 0 0 0 3px #37ff6a;
+  }
+
+  /* ---- TOP-RIGHT : woodgrain console TV ---- */
+  .tvwrap { flex:1; display:flex; align-items:flex-start; justify-content:center; }
+  .tv {
+    width:100%; max-width:560px; padding:18px 18px 46px; position:relative;
+    background:
+      repeating-linear-gradient(90deg, rgba(60,32,10,.55) 0 9px, rgba(120,70,30,.0) 9px 23px),
+      linear-gradient(180deg,#8a5a2e 0%,#6b421f 50%,#4a2a12 100%);
+    box-shadow:inset 0 0 0 4px #2a1708, inset 0 3px 0 rgba(255,200,140,.35), 0 12px 0 #241305, 0 18px 24px rgba(0,0,0,.7);
+    border-radius:6px;
+  }
+  .tv .screen {
+    position:relative; aspect-ratio:4/3; background:#000; border-radius:18px/22px; overflow:hidden;
+    box-shadow:inset 0 0 0 5px #1a0d04, inset 0 0 50px #000;
+  }
+  .static { position:absolute; inset:0; opacity:.9;
+    background:repeating-conic-gradient(#888 0 .00012%, #111 .0002% .0004%, #ddd .0005% .00055%);
+    background-size:97px 97px; animation:static .12s steps(3) infinite; }
+  @keyframes static { 0%{background-position:0 0;} 50%{background-position:48px 31px;} 100%{background-position:19px 77px;} }
+  .screen .ghost { /* faint channel ghost image under static */
+    position:absolute; inset:0; opacity:.35;
+    background:radial-gradient(circle at 50% 40%, #40e0ff 0%, transparent 45%),
+               radial-gradient(circle at 30% 75%, #e040fb 0%, transparent 35%);
+  }
+  .screen .scanlines { position:absolute; inset:0; background:repeating-linear-gradient(0deg,rgba(0,0,0,.4) 0 3px,transparent 3px 6px); }
+  .screen .vig { position:absolute; inset:0; box-shadow:inset 0 0 70px 30px rgba(0,0,0,.9); border-radius:inherit; }
+  .screen .chnum {
+    position:absolute; top:10px; right:14px; font-size:26px; color:#fff; text-shadow:3px 3px 0 #000;
+  }
+  .screen .av { position:absolute; top:12px; left:14px; font-size:12px; color:#37ff6a; text-shadow:2px 2px 0 #000; }
+  .tv .knobs { position:absolute; bottom:14px; left:24px; display:flex; gap:14px; }
+  .knob { width:22px; height:22px; border-radius:50%; background:radial-gradient(circle at 35% 30%,#c8c8c8,#555 70%,#222);
+    box-shadow:0 2px 0 #000; position:relative; }
+  .knob::after { content:""; position:absolute; top:2px; left:50%; width:2px; height:8px; background:#fff; transform:translateX(-50%) rotate(40deg); transform-origin:bottom; }
+  .tv .grill { position:absolute; bottom:12px; right:20px; width:110px; height:22px;
+    background:repeating-linear-gradient(90deg,#1a0d04 0 4px,#3a2210 4px 8px); border-radius:3px; }
+
+  /* ---- BOTTOM : pixel guide ---- */
+  .guide {
+    height:34%; min-height:170px; margin:0 16px 16px; background:#0d0722;
+    display:flex; flex-direction:column; color:#37ff6a;
+  }
+  .guide.px { color:#37ff6a; }
+  .ghead, .row { display:grid; grid-template-columns:160px repeat(4,1fr); }
+  .ghead { background:#e040fb; color:#fff; text-shadow:2px 2px 0 #000; font-size:11px; }
+  .cell {
+    padding:8px 10px; font-size:10.5px; border-right:3px solid #000; border-bottom:3px solid #000;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center;
+  }
+  .row { flex:1; background:#160c33; }
+  .row .chan { background:#2a1a4e; flex-direction:column; align-items:flex-start; justify-content:center; }
+  .row .chan b { color:#40e0ff; font-size:14px; text-shadow:2px 2px 0 #000; }
+  .row .chan small { color:#e040fb; font-size:8px; }
+  .sel { background:#fffc40 !important; color:#000 !important; box-shadow:inset 0 0 0 3px #000; animation:selblink 1.4s steps(2) infinite; }
+  @keyframes selblink { 50% { background:#fff; } }
+  .onair { color:#fffc40; }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <span>★ G-IPTV ARCADE ★</span>
+    <span class="blinky">▶ INSERT TAPE ◀</span>
+    <span>HI-SCORE 07:42 PM</span>
+  </div>
+
+  <div class="stage">
+    <!-- TOP-LEFT -->
+    <section class="infocard px">
+      <span class="tag">NOW SHOWING</span>
+      <div class="chan">CH-001 ★ TAPE VAULT</div>
+      <h1>BEACH TRIP '94<br>(DIGITIZED VHS)</h1>
+      <div class="meta">HOME MOVIE · 1994 · TV-G · 30 MIN</div>
+      <p>
+        HI8 FOOTAGE FROM THE OUTER BANKS VACATION. SANDCASTLE CONTEST,
+        CAMCORDER NARRATION, THE SEAGULL INCIDENT. PRESS START TO WATCH.
+      </p>
+      <div class="hearts">♥♥♥♥♡&nbsp;&nbsp;FAMILY RATING</div>
+      <div class="sel-ind">▶ PLAYER 1 · TAPE 1 OF 2 · READY</div>
+    </section>
+
+    <!-- TOP-RIGHT -->
+    <div class="tvwrap">
+      <div class="tv">
+        <div class="screen">
+          <div class="ghost"></div>
+          <div class="static"></div>
+          <div class="scanlines"></div>
+          <div class="vig"></div>
+          <div class="av">AV1 · STEREO</div>
+          <div class="chnum">01</div>
+        </div>
+        <div class="knobs"><span class="knob"></span><span class="knob"></span><span class="knob"></span></div>
+        <div class="grill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM -->
+  <section class="guide px">
+    <div class="ghead">
+      <div class="cell">CHANNEL</div><div class="cell">7:00 PM</div>
+      <div class="cell">7:30 PM</div><div class="cell">8:00 PM</div><div class="cell">8:30 PM</div>
+    </div>
+    <div class="row">
+      <div class="cell chan"><b>001</b><small>TAPE VAULT</small></div>
+      <div class="cell">GARAGE BAND '98</div>
+      <div class="cell sel">▶ BEACH TRIP '94</div>
+      <div class="cell">CHRISTMAS 1997</div>
+      <div class="cell">GRANDMA'S 70TH</div>
+    </div>
+    <div class="row">
+      <div class="cell chan"><b>002</b><small>HOUSE CAM</small></div>
+      <div class="cell">FRONT PORCH ●</div>
+      <div class="cell onair">● LIVING ROOM LIVE</div>
+      <div class="cell">LIVING ROOM ●</div>
+      <div class="cell">BACKYARD ●</div>
+    </div>
+  </section>
+
+</body>
+</html>
