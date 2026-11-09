@@ -695,6 +695,22 @@
     }
 
     /* ================= TUNING / PLAYBACK (via server proxy) ================= */
+    function stopPlayback() {
+      // silence and reset the TV — used when curate starts so no audio
+      // or stream keeps running under the scan
+      if (hls) { hls.destroy(); hls = null; }
+      player.pause();
+      player.removeAttribute('src');
+      player.load();
+      tunedNum = -1;
+      liveBdg.style.display = 'none';
+      osd.textContent = '';
+      overlay.className = 'overlay';
+      overlay.innerHTML = `<div class="big">G-IPTV</div>
+        <div class="small">▲▼ SELECT · CLICK / ENTER TO TUNE · F = FAVORITE</div>`;
+      overlay.classList.remove('hidden');
+    }
+
     function tune(i) {
       select(i);
       const ch = channels[i];
@@ -771,6 +787,9 @@
         return;
       }
       if (!channels.length) return;
+
+      stopPlayback();          // mute any tuned channel before scanning
+      renderGuide();           // clear the ▶ TUNED marker
 
       const g = groups[activeGroup];
       const qs = `?category=${encodeURIComponent(g.name)}&res=${encodeURIComponent(activeRes)}`;

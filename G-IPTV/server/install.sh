@@ -21,14 +21,15 @@ if [[ ! -x "$VENV/bin/python" ]]; then
 fi
 
 # venvs created on Debian/Ubuntu can ship without pip (ensurepip lives in
-# the python3-venv package). Bootstrap pip if it's missing.
-if [[ ! -x "$VENV/bin/pip" ]]; then
-  echo "-> bootstrapping pip inside the venv"
-  "$VENV/bin/python" -m ensurepip --upgrade 2>/dev/null || {
+# the python3-venv package). Test functionally — a venv can have a broken
+# or missing pip script while still looking "installed" as a file.
+if ! "$VENV/bin/python" -m pip --version >/dev/null 2>&1; then
+  echo "-> pip missing inside the venv; bootstrapping it"
+  if ! "$VENV/bin/python" -m ensurepip --upgrade; then
     echo "-> ensurepip unavailable; fetching get-pip.py"
     curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
     "$VENV/bin/python" /tmp/get-pip.py
-  }
+  fi
 fi
 
 # 2. dependencies ------------------------------------------------------------
