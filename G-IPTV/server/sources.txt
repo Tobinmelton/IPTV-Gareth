@@ -1,0 +1,11 @@
+# G-IPTV sources — one M3U/M3U8 playlist URL per line.
+# Lines starting with # are comments and ignored. Blank lines ignored.
+# Edit this file and restart (or wait for the hourly cache refresh).
+#
+# Format per line:   URL            (optional label after a pipe: URL | Label)
+
+https://iptv-org.github.io/iptv/index.m3u | iptv-org (all)
+
+# Examples of iptv-org subsets you could add instead of/alongside "all":
+# https://iptv-org.github.io/iptv/countries/us.m3u | US channels
+# https://iptv-org.github.io/iptv/categories/movies.m3u | Movies

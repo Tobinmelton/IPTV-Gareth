@@ -36,12 +36,15 @@ CURATE_CONCURRENCY = 24            # kept modest: RAM-tight machines
 CURATE_TIMEOUT = 8.0
 PROBE_MAX_BYTES = 8192             # probe reads only the head of a response
 
+SOURCES_FILE = Path(__file__).resolve().parent / "sources.txt"
+
 app = FastAPI(title="G-IPTV")
 
 # ---------------------------------------------------------------- state
 _playlist_raw: str = ""
 _playlist_fetched: float = 0.0
 _channels: list[dict] = []
+_sources: list[dict] = []          # [{i, label, url}]
 _epg_fetched: float = 0.0
 # tvg-id -> list of (start_epoch, stop_epoch, title)
 _epg: dict[str, list[tuple[int, int, str]]] = {}
@@ -81,8 +84,6 @@ def parse_m3u(text: str) -> list[dict]:
             meta["url"] = line
             out.append(meta)
             meta = None
-    for i, ch in enumerate(out, 1):
-        ch["num"] = i
     return out
 
 
@@ -96,15 +97,51 @@ def _xmltv_epoch(s: str) -> int:
     return int(time.mktime(time.strptime(m.group(1), "%Y%m%d%H%M%S")))
 
 
+def _read_sources() -> list[dict]:
+    """sources.txt — one M3U URL per line, optional 'URL | Label'."""
+    out = []
+    if not SOURCES_FILE.exists():
+        return out
+    for raw in SOURCES_FILE.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "|" in line:
+            url, label = (p.strip() for p in line.split("|", 1))
+        else:
+            url, label = line, ""
+        if url.startswith(("http://", "https://")):
+            out.append({"i": len(out), "label": label or url, "url": url})
+    return out
+
+
 async def refresh_playlist(force: bool = False) -> None:
-    global _playlist_raw, _playlist_fetched, _channels
+    global _playlist_raw, _playlist_fetched, _channels, _sources
     if not force and time.time() - _playlist_fetched < PLAYLIST_CACHE_TTL and _channels:
         return
+    sources = _read_sources()
+    if not sources:                      # fall back to the single env URL
+        sources = [{"i": 0, "label": "default", "url": PLAYLIST_URL}]
     try:
-        r = await client.get(PLAYLIST_URL, timeout=30)
-        r.raise_for_status()
-        _playlist_raw = r.text
-        _channels = parse_m3u(_playlist_raw)
+        async def fetch(src):
+            try:
+                r = await client.get(src["url"], timeout=30)
+                r.raise_for_status()
+                chans = parse_m3u(r.text)
+                for c in chans:
+                    c["src"] = src["i"]
+                return chans
+            except Exception as e:
+                print(f"[sources] {src['label']} failed: {e}")
+                return []
+
+        results = await asyncio.gather(*(fetch(s) for s in sources))
+        merged = [c for chans in results for c in chans]
+        for i, ch in enumerate(merged, 1):
+            ch["num"] = i
+        _channels = merged
+        _sources = sources
+        _playlist_raw = ""               # raw merged view not kept (saves RAM)
         _playlist_fetched = time.time()
     except Exception as e:
         # never take the server down over a transient upstream failure;
@@ -189,6 +226,12 @@ async def api_channels():
     return JSONResponse(_channels)
 
 
+@app.get("/api/sources")
+async def api_sources():
+    await refresh_playlist()
+    return JSONResponse(_sources)
+
+
 @app.get("/api/guide")
 async def api_guide():
     """Now/next program per channel tvg-id, if an EPG source is configured."""
@@ -226,13 +269,16 @@ _curate_cancel: asyncio.Event | None = None
 
 
 @app.post("/api/curate/start")
-async def curate_start(category: str = Query("ALL"), res: str = Query("__ALL__")):
+async def curate_start(category: str = Query("ALL"), res: str = Query("__ALL__"),
+                       src: int = Query(-1)):
     global _curate_task, _curate_cancel
     if _curate_job["running"]:
         return JSONResponse({"ok": False, "msg": "already running"}, status_code=409)
     await refresh_playlist()
 
     targets = _channels
+    if src >= 0:
+        targets = [c for c in targets if c.get("src") == src]
     if category not in ("ALL", "FAVES", "DEAD"):
         targets = [c for c in targets if (c["group"] or "Undefined") == category]
     if res != "__ALL__":

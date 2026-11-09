@@ -43,7 +43,7 @@
 
   /* ---- control strip : category + resolution drop-downs + curate ---- */
   .ctrlbar {
-    display:flex; align-items:center; gap:12px;
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
     padding:8px 16px;
     background:linear-gradient(180deg,#101f5e,#0c1743);
     border-bottom:2px solid #4d6fd1;
@@ -58,7 +58,7 @@
     font-family:inherit; font-size:15px; font-weight:bold; letter-spacing:1px;
     color:#eaf0ff; background:linear-gradient(180deg,#2b4aa8,#1a2f78);
     border:2px solid #5c7fe0; border-radius:8px;
-    padding:7px 40px 7px 14px; min-width:280px; max-width:38vw;
+    padding:7px 36px 7px 12px; width:150px;
     box-shadow:inset 0 1px 0 rgba(255,255,255,.25), 0 2px 6px rgba(0,0,0,.5);
     text-overflow:ellipsis; overflow:hidden; white-space:nowrap;
   }
@@ -305,13 +305,15 @@
     <span class="clock" id="clock">—</span>
   </div>
 
-  <!-- CONTROL STRIP : category + resolution drop-downs + curate -->
+  <!-- CONTROL STRIP : curate far left, then source/category/res -->
   <div class="ctrlbar">
+    <button class="curatebtn" id="curateBtn">⟳ CURATE</button>
+    <span class="clabel">SOURCE ▸</span>
+    <span class="gselwrap"><select class="gsel" id="ssel"></select></span>
     <span class="clabel">CATEGORY ▸</span>
     <span class="gselwrap"><select class="gsel" id="gsel"></select></span>
     <span class="clabel">RES ▸</span>
     <span class="rselwrap"><select class="rsel" id="rsel"></select></span>
-    <button class="curatebtn" id="curateBtn">⟳ CURATE</button>
     <span class="scaninfo" id="scanInfo"></span>
   </div>
 
@@ -387,15 +389,19 @@
     /* ================= SERVER ENDPOINTS (same-origin) ================= */
     const API_CHANNELS = "/api/channels";
     const API_GUIDE    = "/api/guide";
+    const API_SOURCES  = "/api/sources";
     const streamUrl = (u) => "/stream?url=" + encodeURIComponent(u);
 
     const FAV_KEY = "giptv.favorites";
     const CUR_KEY = "giptv.curation";
     const RES_ALL = "__ALL__";
+    const SRC_ALL = -1;
 
     /* ================= STATE ================= */
     let allChannels = [];
     let channels = [];
+    let sources = [];          // [{i, label, url}]
+    let activeSource = SRC_ALL;
     let groups = [];
     let activeGroup = 0;
     let activeRes = RES_ALL;
@@ -420,6 +426,7 @@
     const osd     = document.getElementById('osd');
     const liveBdg = document.getElementById('liveBadge');
     const gsel    = document.getElementById('gsel');
+    const ssel    = document.getElementById('ssel');
     const rsel    = document.getElementById('rsel');
     const scanInfo= document.getElementById('scanInfo');
     const curBtn  = document.getElementById('curateBtn');
@@ -520,15 +527,42 @@
     }
 
     /* ================= GROUPS / DROP-DOWNS ================= */
+    function sourcePool() {   // channels from the currently selected source
+      return activeSource === SRC_ALL
+        ? allChannels
+        : allChannels.filter(c => c.src === activeSource);
+    }
+
+    function renderSourceSelect() {
+      ssel.innerHTML = '';
+      const all = document.createElement('option');
+      all.value = SRC_ALL;
+      all.textContent = `ALL SOURCES (${allChannels.length.toLocaleString()})`;
+      ssel.appendChild(all);
+      sources.forEach(s => {
+        const n = allChannels.filter(c => c.src === s.i).length;
+        const opt = document.createElement('option');
+        opt.value = s.i;
+        opt.textContent = `${s.label.toUpperCase()} (${n.toLocaleString()})`;
+        ssel.appendChild(opt);
+      });
+      ssel.value = String(activeSource);
+    }
+    ssel.addEventListener('change', () => {
+      activeSource = +ssel.value; activeGroup = 0; activeRes = RES_ALL;
+      applyFilter(false);
+    });
+
     function buildGroups() {
+      const pool = sourcePool();
       const counts = new Map();
-      for (const ch of allChannels) {
+      for (const ch of pool) {
         const g = ch.group || 'Undefined';
         counts.set(g, (counts.get(g) || 0) + 1);
       }
-      groups = [{ name:'ALL', count: allChannels.length }];
-      if (favorites.size) groups.push({ name:'FAVES', count: favorites.size });
-      if (deadSet.size)   groups.push({ name:'DEAD',  count: deadSet.size });
+      groups = [{ name:'ALL', count: pool.length }];
+      if (favorites.size) groups.push({ name:'FAVES', count: pool.filter(c=>favorites.has(c.num)).length });
+      if (deadSet.size)   groups.push({ name:'DEAD',  count: pool.filter(c=>deadSet.has(c.num)).length });
       groups.push(...[...counts.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, count })));
@@ -593,11 +627,12 @@
 
     function applyFilter(fromFavToggle = false, keepNum = null) {
       const g = groups[activeGroup];
+      const pool = sourcePool();
       let base;
-      if (g.name === 'ALL') base = allChannels;
-      else if (g.name === 'FAVES') base = allChannels.filter(c => favorites.has(c.num));
-      else if (g.name === 'DEAD')  base = allChannels.filter(c => deadSet.has(c.num));
-      else base = allChannels.filter(c => (c.group || 'Undefined') === g.name);
+      if (g.name === 'ALL') base = pool;
+      else if (g.name === 'FAVES') base = pool.filter(c => favorites.has(c.num));
+      else if (g.name === 'DEAD')  base = pool.filter(c => deadSet.has(c.num));
+      else base = pool.filter(c => (c.group || 'Undefined') === g.name);
 
       buildResOptions(base);
       if (activeRes !== RES_ALL) {
@@ -607,6 +642,7 @@
       channels = sortForView(base, g.name === 'DEAD');
 
       buildGroups();
+      renderSourceSelect();
       renderGroupSelect();
       renderResSelect();
       renderGuide();
@@ -798,7 +834,7 @@
       renderGuide();           // clear the ▶ TUNED marker
 
       const g = groups[activeGroup];
-      const qs = `?category=${encodeURIComponent(g.name)}&res=${encodeURIComponent(activeRes)}`;
+      const qs = `?category=${encodeURIComponent(g.name)}&res=${encodeURIComponent(activeRes)}&src=${activeSource}`;
 
       let start;
       try {
@@ -916,6 +952,11 @@
         if (!res.ok) throw new Error('HTTP ' + res.status);
         allChannels = await res.json();
         if (!allChannels.length) throw new Error('server returned 0 channels');
+        // sources list for the SOURCE drop-down
+        try {
+          const sres = await fetch(API_SOURCES);
+          if (sres.ok) sources = await sres.json();
+        } catch { /* older server — fine */ }
         buildGroups();
         setGroup(0);
         // guide data is best-effort (requires GIPTV_EPG_URL on the server)
