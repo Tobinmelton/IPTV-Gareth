@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G-IPTV — Stage 09</title>
+<style>
+  /* ============ STAGE 09 : CABLE BOX 2003 + REAL M3U ============
+     Based on stage08. Changes in Stage 09 (curate hardening):
+       - BUGFIX: scan locking mid-run (e.g. 80%) and never finishing.
+         Root causes found in audit:
+           1) shared-array queue + shift() across 40 async workers
+              = racy; skipped probes meant done never equaled total
+           2) losing fetch in the timeout race left a dangling
+              abort listener and could still suspend its worker
+           3) AbortSignal delivery isn't guaranteed on stall
+         Fix: pre-sharded per-worker queues (no shared state), every
+         probe wrapped in its own guaranteed-fire timeout, and ALL
+         outcomes funnel through a single counted path. Workers
+         physically cannot stall; completion is unconditional.
+       - Honesty note: browser probes classify CORS-rejected and
+         header-required streams as dead; ~5% of failures are true
+         timeouts. Server-side probing (Phase 3) is the real fix.
+     Carried over (unchanged):
+       - SCAN COMPLETE / STOPPED results card before returning
+       - Full-screen console: 130px %, big meter, counts, elapsed
+         + ETA countdown, now-probing, STOP button / Esc
+       - Category drop-down, CURATE button, ordering rules,
+         localStorage caching, favorites, playback pipeline */
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body {
+    font-family: Verdana, Geneva, sans-serif;
+    background: linear-gradient(180deg,#0a1440 0%,#122a6e 55%,#0a1440 100%);
+    color:#fff; overflow:hidden;
+    display:flex; flex-direction:column;
+  }
+
+  /* ---- top strip : clock + branding ---- */
+  .topbar {
+    display:flex; justify-content:space-between; align-items:center; gap:16px;
+    padding:10px 18px; font-size:16px; letter-spacing:1px;
+    background:linear-gradient(180deg,#2b4aa8,#16296b);
+    border-bottom:2px solid #4d6fd1;
+    text-shadow:1px 1px 0 #000;
+  }
+  .topbar .brand { font-weight:bold; color:#ffd94d; flex:0 0 auto; }
+  .topbar .clock { font-variant-numeric:tabular-nums; flex:0 0 auto; }
+
+  /* ---- control strip : category drop-down + curate ---- */
+  .ctrlbar {
+    display:flex; align-items:center; gap:12px;
+    padding:8px 16px;
+    background:linear-gradient(180deg,#101f5e,#0c1743);
+    border-bottom:2px solid #4d6fd1;
+  }
+  .ctrlbar .clabel {
+    font-size:12px; font-weight:bold; letter-spacing:2px; color:#9fc0ff;
+    text-shadow:1px 1px 0 #000;
+  }
+  .gselwrap { position:relative; }
+  .gsel {
+    appearance:none; -webkit-appearance:none; cursor:pointer;
+    font-family:inherit; font-size:15px; font-weight:bold; letter-spacing:1px;
+    color:#eaf0ff; background:linear-gradient(180deg,#2b4aa8,#1a2f78);
+    border:2px solid #5c7fe0; border-radius:8px;
+    padding:7px 40px 7px 14px; min-width:340px; max-width:46vw;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.25), 0 2px 6px rgba(0,0,0,.5);
+    text-overflow:ellipsis; overflow:hidden; white-space:nowrap;
+  }
+  .gselwrap::after {
+    content:"▼"; position:absolute; right:14px; top:50%; transform:translateY(-50%);
+    font-size:12px; color:#ffd94d; pointer-events:none;
+  }
+  .gsel:focus { outline:2px solid #ffd94d; outline-offset:1px; }
+  .gsel option { background:#101f5e; color:#eaf0ff; font-weight:normal; }
+  .gsel option[data-faves] { color:#ffd94d; }
+  .gsel option[data-dead]  { color:#c98a8a; }
+  .curatebtn {
+    flex:0 0 auto; padding:7px 22px; border-radius:8px; cursor:pointer;
+    font-size:14px; font-weight:bold; letter-spacing:2px;
+    color:#0a2a10; background:linear-gradient(180deg,#d8ffb0,#79c92e 55%,#4a9a10);
+    border:2px solid #a8e860; box-shadow:inset 0 1px 1px rgba(255,255,255,.8), 0 2px 6px rgba(0,0,0,.5);
+  }
+  .curatebtn:hover { filter:brightness(1.1); }
+  .curatebtn.running { background:linear-gradient(180deg,#ffe9a0,#ffb52e 55%,#d08000); color:#4a2c00; border-color:#ffd94d; }
+  .ctrlbar .scaninfo { font-size:12px; color:#7d93d8; margin-left:auto; letter-spacing:1px; }
+
+  /* ---- FULL-SCREEN CURATE OVERLAY ---- */
+  .curate-screen {
+    position:fixed; inset:0; z-index:100; display:none;
+    flex-direction:column; align-items:center; justify-content:center; gap:22px;
+    background:
+      radial-gradient(ellipse at center, rgba(18,42,110,.96) 0%, rgba(6,10,32,.98) 80%),
+      repeating-linear-gradient(0deg, rgba(0,0,0,.2) 0 2px, transparent 2px 4px);
+    text-shadow:1px 1px 0 #000;
+  }
+  .curate-screen.on { display:flex; }
+  .curate-screen .title {
+    font-size:28px; letter-spacing:8px; font-weight:bold; color:#9fc0ff;
+  }
+  .curate-screen .pct {
+    font-size:130px; font-weight:bold; line-height:1; color:#ffd94d;
+    text-shadow:0 0 30px rgba(255,182,46,.45), 3px 3px 0 #000;
+    font-variant-numeric:tabular-nums;
+  }
+  .curate-screen .meter {
+    width:min(72vw, 900px); height:44px; border:3px solid #5c7fe0; border-radius:22px;
+    background:#0a1440; overflow:hidden;
+    box-shadow:inset 0 2px 8px #000, 0 0 24px rgba(60,100,220,.35);
+  }
+  .curate-screen .meter .fill {
+    height:100%; width:0%;
+    background:linear-gradient(90deg,#ffd94d,#ff9d2e);
+    box-shadow:0 0 18px rgba(255,182,46,.7);
+    transition:width .2s;
+  }
+  .curate-screen .counts {
+    display:flex; gap:42px; font-size:24px; font-weight:bold; font-variant-numeric:tabular-nums;
+  }
+  .counts .tested { color:#c9d8ff; }
+  .counts .alive  { color:#7ae88a; }
+  .counts .dead   { color:#ff8a7a; }
+  .curate-screen .eta {
+    display:flex; gap:42px; font-size:19px; color:#9fc0ff; font-variant-numeric:tabular-nums;
+  }
+  .eta b { color:#fff; }
+  .curate-screen .nowprobing {
+    font-size:15px; color:#7d93d8; max-width:80vw;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .curate-screen .stopbtn {
+    margin-top:6px; padding:12px 44px; border-radius:12px; cursor:pointer;
+    font-size:18px; font-weight:bold; letter-spacing:3px;
+    color:#fff; background:linear-gradient(180deg,#e05a4a,#a8281c);
+    border:2px solid #ff8a7a; box-shadow:0 4px 14px rgba(0,0,0,.6);
+  }
+  .curate-screen .stopbtn:hover { filter:brightness(1.15); }
+
+  /* ---- middle area : description + TV ---- */
+  .stage { flex:1; display:flex; gap:14px; padding:14px 16px; min-height:0; }
+
+  .infocard {
+    width:33%;
+    background:linear-gradient(180deg,#27439c 0%,#152a70 100%);
+    border:2px solid #5c7fe0; border-radius:10px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.35), 0 4px 10px rgba(0,0,0,.5);
+    padding:20px 22px; display:flex; flex-direction:column; gap:12px;
+    overflow:hidden;
+  }
+  .infocard .channum {
+    font-size:58px; font-weight:bold; color:#ffd94d; text-shadow:3px 3px 0 #000;
+  }
+  .infocard .channame { font-size:23px; letter-spacing:3px; color:#9fc0ff;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .infocard h1 { font-size:30px; margin-top:6px; text-shadow:2px 2px 0 #000; line-height:1.2; }
+  .infocard .meta { font-size:16px; color:#c9d8ff; display:flex; gap:12px; flex-wrap:wrap; }
+  .infocard p.desc { font-size:18px; line-height:1.5; color:#eaf0ff; margin-top:6px; overflow-y:auto; }
+  .infocard p.desc::-webkit-scrollbar { width:8px; }
+  .infocard p.desc::-webkit-scrollbar-thumb { background:#3f5fc0; border-radius:4px; }
+  .progress { margin-top:auto; }
+  .badges { display:flex; gap:6px; margin-top:6px; flex-wrap:wrap; align-items:center; }
+  .badge {
+    font-size:13px; padding:4px 10px; border-radius:4px; letter-spacing:1px;
+    background:#0a1440; border:1px solid #5c7fe0; color:#ffd94d;
+  }
+  .badge.fav { background:#3a2a00; border-color:#ffb62e; color:#ffe57a; }
+  .badge.dead { background:#3a0f0f; border-color:#a84a4a; color:#ff9a8a; }
+  .badge.alive { background:#0f2f12; border-color:#4aa84a; color:#9ae8a0; }
+  .favbtn {
+    font-size:13px; font-weight:bold; padding:4px 12px; border-radius:4px; cursor:pointer;
+    background:#0a1440; border:1px solid #5c7fe0; color:#c9d8ff; letter-spacing:1px;
+  }
+  .favbtn:hover { border-color:#ffd94d; color:#ffd94d; }
+
+  /* ---- TV : silver CRT bezel — fills its whole panel ---- */
+  .tvwrap { flex:1; display:flex; min-height:0; }
+  .tv {
+    height:100%; margin:0 auto; display:flex;
+    background:linear-gradient(180deg,#d7dbe0 0%,#9aa1a9 50%,#6d747d 100%);
+    border-radius:18px; padding:18px 18px 44px;
+    box-shadow:inset 0 2px 3px #fff, inset 0 -3px 6px rgba(0,0,0,.4), 0 8px 18px rgba(0,0,0,.6);
+    position:relative;
+  }
+  .tv .screen {
+    position:relative; height:100%; aspect-ratio:4/3; max-width:100%;
+    border-radius:14px/18px; overflow:hidden;
+    background:#000; border:3px solid #3a3f45;
+    box-shadow:inset 0 0 40px #000;
+  }
+  .screen video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000; }
+  .screen .overlay {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:14px; text-align:center;
+    background:
+      repeating-linear-gradient(0deg,rgba(0,0,0,.35) 0 2px,transparent 2px 4px),
+      radial-gradient(ellipse at center,#16306e 0%,#0a1440 75%);
+    z-index:2; padding:20px;
+  }
+  .screen .overlay .big { font-size:34px; font-weight:bold; color:#ffd94d; text-shadow:2px 2px 0 #000; }
+  .screen .overlay .med { font-size:20px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; }
+  .screen .overlay .small { font-size:15px; color:#9fc0ff; line-height:1.5; }
+  .screen .overlay.err { background:
+      repeating-linear-gradient(0deg,rgba(0,0,0,.35) 0 2px,transparent 2px 4px),
+      radial-gradient(ellipse at center,#4e1020 0%,#1a040a 75%); }
+  .screen .overlay.err .big { color:#ff8a7a; }
+  .screen .overlay.hidden { display:none; }
+  .screen .scanlines {
+    position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.35) 0 2px,transparent 2px 4px);
+    mix-blend-mode:multiply; z-index:3;
+  }
+  .screen .vignette { position:absolute; inset:0; box-shadow:inset 0 0 60px 24px rgba(0,0,0,.75); border-radius:inherit; pointer-events:none; z-index:4; }
+  .screen .osd {
+    position:absolute; top:12px; left:14px; font-size:18px; font-weight:bold; z-index:5;
+    color:#fff; text-shadow:1px 1px 0 #000; letter-spacing:1px;
+  }
+  .screen .live {
+    position:absolute; top:12px; right:14px; font-size:14px; font-weight:bold; z-index:5;
+    background:#c80000; padding:3px 10px; border-radius:3px; box-shadow:0 0 8px #c80000;
+    display:none;
+  }
+  .screen .bug {
+    position:absolute; bottom:12px; right:14px; font-size:13px; letter-spacing:1px; z-index:5;
+    background:rgba(0,0,0,.55); padding:3px 8px; border-radius:3px; color:#ffd94d;
+  }
+  .tv .brandplate {
+    position:absolute; bottom:12px; left:0; right:0; text-align:center;
+    font-size:13px; letter-spacing:5px; color:#3a3f45; font-weight:bold; text-shadow:0 1px 0 rgba(255,255,255,.6);
+  }
+  .tv .led { position:absolute; bottom:14px; right:26px; width:7px; height:7px; border-radius:50%; background:#37ff6a; box-shadow:0 0 6px #37ff6a; }
+
+  /* ---- guide : full width, tight rows, wide CH column, scrollable body ---- */
+  .guide {
+    height:34%; min-height:220px; margin:0 16px 14px;
+    background:linear-gradient(180deg,#1c37a0,#101f5e);
+    border:2px solid #5c7fe0; border-radius:8px; overflow:hidden;
+    display:flex; flex-direction:column;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.25), 0 4px 10px rgba(0,0,0,.5);
+  }
+  .guide .ghead {
+    display:grid; grid-template-columns:300px repeat(4,1fr);
+    background:linear-gradient(180deg,#3f5fc0,#243f92); font-size:14px; font-weight:bold;
+    border-bottom:2px solid #5c7fe0; text-shadow:1px 1px 0 #000;
+    flex:0 0 auto;
+  }
+  .guide .ghead .cell { padding:4px 6px 4px 12px; }        /* slim header */
+  .guide .gbody { flex:1; overflow-y:auto; }               /* rows scroll, header pinned */
+  .guide .gbody::-webkit-scrollbar { width:10px; }
+  .guide .gbody::-webkit-scrollbar-thumb { background:#3f5fc0; border-radius:5px; }
+  .guide .gbody::-webkit-scrollbar-track { background:#101f5e; }
+  .guide .row { display:grid; grid-template-columns:300px repeat(4,1fr); font-size:17px; flex:0 0 auto; cursor:pointer; }
+  .guide .row:hover .cell { background:rgba(255,217,77,.08); }
+  .guide .cell {
+    border-right:1px solid #3d55a8; border-bottom:1px solid #3d55a8;
+    padding:3px 6px; line-height:1.2;              /* tight rows */
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    display:flex; align-items:center;
+  }
+  .guide .chan {
+    flex-direction:row; align-items:center; justify-content:flex-start; gap:10px;
+    background:linear-gradient(180deg,#2b4aa8,#1a2f78); font-weight:bold;
+    padding-left:12px;
+  }
+  .guide .chan img { width:30px; height:30px; object-fit:contain; border-radius:4px; background:#0a1440; flex:0 0 auto; }
+  .guide .chan .num { color:#ffd94d; font-size:21px; }
+  .guide .chan .name { font-size:21px; color:#c9d8ff; letter-spacing:0;
+    overflow:hidden; text-overflow:ellipsis; }
+  .guide .chan .star { color:#ffe57a; font-size:17px; flex:0 0 auto; }
+  .guide .row.deadrow .chan { background:linear-gradient(180deg,#4a2438,#33152a); }
+  .guide .row.deadrow .chan .num,
+  .guide .row.deadrow .chan .name { color:#8a7a90; }
+  .guide .selrow .cell { background:rgba(255,217,77,.12); }
+  .guide .selrow .cell.sel {
+    background:linear-gradient(180deg,#ffe57a,#ffb62e) !important; color:#101f5e; font-weight:bold;
+    outline:2px solid #fff; outline-offset:-2px; text-shadow:none;
+  }
+  .guide .livecell { color:#ffd94d; font-weight:bold; }
+  .guide .status {
+    padding:18px; font-size:17px; color:#9fc0ff; text-align:center;
+  }
+  .guide .status.err { color:#ff8a7a; }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <span class="brand">◆ G-IPTV DIGITAL CABLE</span>
+    <span id="srcLabel">LOADING PLAYLIST…</span>
+    <span class="clock" id="clock">—</span>
+  </div>
+
+  <!-- CONTROL STRIP : category drop-down + curate -->
+  <div class="ctrlbar">
+    <span class="clabel">CATEGORY ▸</span>
+    <span class="gselwrap"><select class="gsel" id="gsel"></select></span>
+    <button class="curatebtn" id="curateBtn">⟳ CURATE</button>
+    <span class="scaninfo" id="scanInfo"></span>
+  </div>
+
+  <div class="stage">
+    <!-- TOP-LEFT : channel description -->
+    <section class="infocard">
+      <div class="channum" id="infoNum">CH —</div>
+      <div class="channame" id="infoGroup">NO SIGNAL</div>
+      <h1 id="infoTitle">Select a channel from the guide</h1>
+      <div class="meta" id="infoMeta"><span>playlist loading…</span></div>
+      <p class="desc" id="infoDesc">
+        The channel guide below is loaded from a real-world M3U playlist.
+        Pick a category from the drop-down, click or press Enter to tune,
+        and press <b>F</b> to tag a favorite. <b>CURATE</b> tests every channel
+        in the current view — dead channels sink to the bottom, and the
+        DEAD category lists only them.
+      </p>
+      <div class="badges" id="infoBadges"></div>
+      <div class="progress"></div>
+    </section>
+
+    <!-- TOP-RIGHT : retro TV, fills its panel -->
+    <div class="tvwrap">
+      <div class="tv">
+        <div class="screen">
+          <video id="player" muted playsinline></video>
+          <div class="overlay" id="overlay">
+            <div class="big">G-IPTV</div>
+            <div class="small">▲▼ SELECT · CLICK / ENTER TO TUNE · F = FAVORITE</div>
+          </div>
+          <div class="scanlines"></div>
+          <div class="vignette"></div>
+          <div class="osd" id="osd"></div>
+          <div class="live" id="liveBadge">● LIVE</div>
+          <div class="bug">G-IPTV</div>
+        </div>
+        <div class="brandplate">TRINITRONY &nbsp;KV-27GTV</div>
+        <div class="led"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM : guide -->
+  <section class="guide">
+    <div class="ghead">
+      <div class="cell">CH</div>
+      <div class="cell">NOW</div><div class="cell">+30 MIN</div>
+      <div class="cell">+60 MIN</div><div class="cell">+90 MIN</div>
+    </div>
+    <div class="gbody" id="gbody">
+      <div class="status">Fetching playlist…</div>
+    </div>
+  </section>
+
+  <!-- FULL-SCREEN CURATE OVERLAY -->
+  <div class="curate-screen" id="curateScreen">
+    <div class="title" id="curTitle">CHANNEL CURATION IN PROGRESS</div>
+    <div class="pct" id="curPct">0%</div>
+    <div class="meter"><div class="fill" id="curFill"></div></div>
+    <div class="counts">
+      <span class="tested" id="curTested">0 / 0 TESTED</span>
+      <span class="alive" id="curAlive">🟢 0 ALIVE</span>
+      <span class="dead" id="curDead">⚫ 0 DEAD</span>
+    </div>
+    <div class="eta">
+      <span>ELAPSED <b id="curElapsed">0:00</b></span>
+      <span>EST. REMAINING <b id="curEta">—</b></span>
+    </div>
+    <div class="nowprobing" id="curProbing"></div>
+    <button class="stopbtn" id="curStop">■ STOP SCAN</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+  <script>
+    /* ================= CONFIG ================= */
+    const PLAYLIST_URL = "https://iptv-org.github.io/iptv/index.m3u";
+    const FAV_KEY     = "giptv.favorites";
+    const CUR_KEY     = "giptv.curation";
+    const CUR_CONCURRENCY = 40;
+    const CUR_TIMEOUT_MS  = 6000;    // per-probe soft timeout
+    const PROBE_HARD_MS   = 9000;    // absolute ceiling, no exceptions
+    const COMPLETE_DWELL_MS = 2500;
+
+    /* ================= STATE ================= */
+    let allChannels = [];
+    let channels = [];
+    let groups = [];
+    let activeGroup = 0;
+    let selectedIdx = -1;
+    let tunedNum = -1;
+    let favorites = new Set();
+    let deadSet = new Set();
+    let aliveSet = new Set();
+    let lastScanTs = 0;
+    let curating = false;
+    let curateAbort = null;
+    let hls = null;
+    let tuneSeq = 0;
+    let hlsReady = false;
+
+    const gbody   = document.getElementById('gbody');
+    const clock   = document.getElementById('clock');
+    const srcLbl  = document.getElementById('srcLabel');
+    const player  = document.getElementById('player');
+    const overlay = document.getElementById('overlay');
+    const osd     = document.getElementById('osd');
+    const liveBdg = document.getElementById('liveBadge');
+    const gsel    = document.getElementById('gsel');
+    const scanInfo= document.getElementById('scanInfo');
+    const curBtn  = document.getElementById('curateBtn');
+    const cScreen = document.getElementById('curateScreen');
+    const curTitle= document.getElementById('curTitle');
+    const curPct  = document.getElementById('curPct');
+    const curFill = document.getElementById('curFill');
+    const curTested = document.getElementById('curTested');
+    const curAlive  = document.getElementById('curAlive');
+    const curDead   = document.getElementById('curDead');
+    const curElapsed= document.getElementById('curElapsed');
+    const curEta    = document.getElementById('curEta');
+    const curProbing= document.getElementById('curProbing');
+    const curStop   = document.getElementById('curStop');
+
+    /* ================= HELPERS ================= */
+    function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+    function fmtDur(ms) {
+      if (!isFinite(ms) || ms < 0) return '—';
+      const s = Math.round(ms / 1000);
+      const m = Math.floor(s / 60), r = s % 60;
+      if (m >= 60) { const h = Math.floor(m/60); return `${h}h ${m%60}m`; }
+      return `${m}:${String(r).padStart(2,'0')}`;
+    }
+
+    /* ================= SCREEN STATES ================= */
+    function showOverlay(html, isErr = false) {
+      overlay.className = 'overlay' + (isErr ? ' err' : '');
+      overlay.innerHTML = html;
+      overlay.classList.remove('hidden');
+    }
+    function hideOverlay() { overlay.classList.add('hidden'); }
+    function showTuning(ch) {
+      showOverlay(`<div class="med">TUNING CH ${String(ch.num).padStart(3,'0')}…</div>
+                   <div class="small">${esc(ch.name)}</div>`);
+    }
+    function showNoSignal(ch, why) {
+      showOverlay(`<div class="big">NO SIGNAL</div>
+                   <div class="med">CH ${String(ch.num).padStart(3,'0')} · ${esc(ch.name)}</div>
+                   <div class="small">${esc(why)}<br>Many public streams are geo-blocked or offline — try another channel.</div>`, true);
+      osd.textContent = `CH ${String(ch.num).padStart(3,'0')} · STREAM UNAVAILABLE`;
+      liveBdg.style.display = 'none';
+    }
+
+    /* ================= PERSISTENCE ================= */
+    function loadFavorites() {
+      try { favorites = new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')); }
+      catch { favorites = new Set(); }
+    }
+    function saveFavorites() {
+      localStorage.setItem(FAV_KEY, JSON.stringify([...favorites]));
+    }
+    function loadCuration() {
+      try {
+        const c = JSON.parse(localStorage.getItem(CUR_KEY) || 'null');
+        if (c) { deadSet = new Set(c.dead || []); aliveSet = new Set(c.alive || []); lastScanTs = c.ts || 0; }
+      } catch { /* fresh start */ }
+    }
+    function saveCuration() {
+      localStorage.setItem(CUR_KEY, JSON.stringify({
+        ts: lastScanTs, dead: [...deadSet], alive: [...aliveSet]
+      }));
+    }
+
+    function toggleFavorite() {
+      if (selectedIdx < 0 || !channels.length) return;
+      const ch = channels[selectedIdx];
+      if (favorites.has(ch.num)) favorites.delete(ch.num);
+      else favorites.add(ch.num);
+      saveFavorites();
+      applyFilter(true);
+    }
+
+    /* ================= CLOCK ================= */
+    function tickClock() {
+      const d = new Date();
+      const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+      const mon  = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      let h = d.getHours(), ap = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      clock.textContent =
+        `${days[d.getDay()]}  ${mon[d.getMonth()]} ${String(d.getDate()).padStart(2,'0')}  ${h}:${String(d.getMinutes()).padStart(2,'0')} ${ap}`;
+    }
+    tickClock(); setInterval(tickClock, 1000 * 15);
+
+    /* ================= M3U PARSING ================= */
+    function parseM3U(text) {
+      const lines = text.split(/\r?\n/);
+      const out = [];
+      let meta = null;
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line || line === '#EXTM3U') continue;
+        if (line.startsWith('#EXTINF')) {
+          meta = { id:'', name:'', logo:'', group:'', extras:[] };
+          const attrRe = /([\w-]+)="([^"]*)"/g; let m;
+          while ((m = attrRe.exec(line)) !== null) {
+            const k = m[1].toLowerCase(), v = m[2];
+            if (k === 'tvg-id') meta.id = v;
+            else if (k === 'tvg-logo') meta.logo = v;
+            else if (k === 'group-title') meta.group = v;
+            else meta.extras.push(`${k}=${v}`);
+          }
+          const comma = line.indexOf(',');
+          meta.name = comma >= 0 ? line.slice(comma + 1).trim() : 'Unknown';
+        } else if (line.startsWith('#')) {
+          // #EXTVLCOPT and friends — skip
+        } else if (meta) {
+          meta.url = line;
+          out.push(meta);
+          meta = null;
+        }
+      }
+      return out;
+    }
+
+    /* ================= GROUPS / DROP-DOWN ================= */
+    function buildGroups() {
+      const counts = new Map();
+      for (const ch of allChannels) {
+        const g = ch.group || 'Undefined';
+        counts.set(g, (counts.get(g) || 0) + 1);
+      }
+      groups = [{ name:'ALL', count: allChannels.length }];
+      if (favorites.size) groups.push({ name:'FAVES', count: favorites.size });
+      if (deadSet.size)   groups.push({ name:'DEAD',  count: deadSet.size });
+      groups.push(...[...counts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({ name, count })));
+    }
+
+    function renderGroupSelect() {
+      gsel.innerHTML = '';
+      groups.forEach((g, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        const icon = g.name === 'FAVES' ? '★ ' : g.name === 'DEAD' ? '⚫ ' : '';
+        opt.textContent = `${icon}${g.name.toUpperCase()} (${g.count.toLocaleString()})`;
+        if (g.name === 'FAVES') opt.setAttribute('data-faves', '');
+        if (g.name === 'DEAD')  opt.setAttribute('data-dead', '');
+        gsel.appendChild(opt);
+      });
+      gsel.value = String(activeGroup);
+    }
+    gsel.addEventListener('change', () => setGroup(+gsel.value));
+
+    function setGroup(i, keepNum) {
+      activeGroup = (i + groups.length) % groups.length;
+      applyFilter(false, keepNum);
+    }
+
+    function sortForView(base, isDeadView) {
+      if (isDeadView) return base;
+      const fav  = base.filter(c =>  favorites.has(c.num));
+      const rest = base.filter(c => !favorites.has(c.num));
+      const good = rest.filter(c => !deadSet.has(c.num));
+      const dead = rest.filter(c =>  deadSet.has(c.num));
+      return [...fav, ...good, ...dead];
+    }
+
+    function applyFilter(fromFavToggle = false, keepNum = null) {
+      const g = groups[activeGroup];
+      let base;
+      if (g.name === 'ALL') base = allChannels;
+      else if (g.name === 'FAVES') base = allChannels.filter(c => favorites.has(c.num));
+      else if (g.name === 'DEAD')  base = allChannels.filter(c => deadSet.has(c.num));
+      else base = allChannels.filter(c => (c.group || 'Undefined') === g.name);
+
+      channels = sortForView(base, g.name === 'DEAD');
+
+      buildGroups();
+      renderGroupSelect();
+      renderGuide();
+      srcLbl.textContent = `${channels.length.toLocaleString()} CHANNELS · ${g.name.toUpperCase()}`;
+      scanInfo.textContent = lastScanTs
+        ? `LAST SCAN ${new Date(lastScanTs).toLocaleString()} · 🟢 ${aliveSet.size} · ⚫ ${deadSet.size}`
+        : '';
+
+      if (!channels.length) { selectedIdx = -1; return; }
+      if (keepNum != null) {
+        const at = channels.findIndex(c => c.num === keepNum);
+        select(at >= 0 ? at : 0, true);
+      } else if (fromFavToggle) {
+        select(selectedIdx >= 0 && selectedIdx < channels.length ? selectedIdx : 0, true);
+      } else {
+        select(0, false);
+      }
+    }
+
+    /* ================= GUIDE RENDER ================= */
+    function renderGuide() {
+      gbody.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      channels.forEach((ch, i) => {
+        const fav = favorites.has(ch.num);
+        const dead = deadSet.has(ch.num);
+        const row = document.createElement('div');
+        row.className = 'row' + (dead && !fav ? ' deadrow' : ''); row.dataset.idx = i;
+        const statusDot = dead ? '⚫' : aliveSet.has(ch.num) ? '🟢' : '';
+        row.innerHTML = `
+          <div class="cell chan">
+            ${fav ? '<span class="star">★</span>' : ''}
+            ${ch.logo ? `<img src="${esc(ch.logo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}
+            <span class="num">${String(ch.num).padStart(3,'0')}</span>
+            <span class="name">${esc(ch.name)}</span>
+          </div>
+          <div class="cell livecell">${tunedNum===ch.num ? '▶ TUNED' : (dead ? '⚫ DEAD' : '● LIVE')}</div>
+          <div class="cell">${dead ? '⚫' : '● LIVE'}</div>
+          <div class="cell">${dead ? '⚫' : '● LIVE'}</div>
+          <div class="cell">${statusDot || '● LIVE'}</div>`;
+        row.addEventListener('click', () => tune(i));
+        frag.appendChild(row);
+      });
+      gbody.appendChild(frag);
+    }
+
+    /* ================= SELECTION / INFO PANEL ================= */
+    function select(i, scroll = true) {
+      if (!channels.length) return;
+      selectedIdx = (i + channels.length) % channels.length;
+      gbody.querySelectorAll('.row').forEach(r => {
+        r.classList.toggle('selrow', +r.dataset.idx === selectedIdx);
+      });
+      const ch = channels[selectedIdx];
+      const fav = favorites.has(ch.num);
+      const dead = deadSet.has(ch.num);
+      document.getElementById('infoNum').textContent   = 'CH ' + String(ch.num).padStart(3,'0');
+      document.getElementById('infoGroup').textContent = (ch.group || 'UNDEFINED').toUpperCase();
+      document.getElementById('infoTitle').textContent = ch.name;
+      document.getElementById('infoMeta').innerHTML =
+        `<span>${esc(ch.id || 'no tvg-id')}</span><span>•</span><span>HLS / IP stream</span>`;
+      document.getElementById('infoDesc').textContent =
+        `${ch.name} — ${ch.group || 'undefined'} channel from the loaded M3U playlist.` +
+        (dead ? ' Last curation scan marked this stream unreachable.' : '');
+      document.getElementById('infoBadges').innerHTML =
+        `<span class="badge">${esc((ch.group || 'GENERAL').toUpperCase())}</span>` +
+        (fav ? '<span class="badge fav">★ FAVORITE</span>' : '') +
+        (dead ? '<span class="badge dead">⚫ DEAD (LAST SCAN)</span>'
+              : aliveSet.has(ch.num) ? '<span class="badge alive">🟢 ONLINE (LAST SCAN)</span>' : '') +
+        `<button class="favbtn" id="favBtn">${fav ? '★ UNFAVORITE' : '☆ FAVORITE'} (F)</button>`;
+      document.getElementById('favBtn').addEventListener('click', toggleFavorite);
+      if (scroll) {
+        const row = gbody.querySelector(`.row[data-idx="${selectedIdx}"]`);
+        if (row) row.scrollIntoView({ block:'nearest' });
+      }
+    }
+
+    /* ================= TUNING / PLAYBACK ================= */
+    function tune(i) {
+      select(i);
+      const ch = channels[i];
+      tunedNum = ch.num;
+      const seq = ++tuneSeq;
+
+      if (hls) { hls.destroy(); hls = null; }
+      player.pause();
+      player.removeAttribute('src');
+      player.load();
+
+      showTuning(ch);
+      liveBdg.style.display = 'block';
+      osd.textContent = `CH ${String(ch.num).padStart(3,'0')} · ${ch.name}`;
+
+      gbody.querySelectorAll('.row').forEach(r => {
+        const c = channels[+r.dataset.idx];
+        r.children[1].textContent = c.num === tunedNum ? '▶ TUNED'
+          : deadSet.has(c.num) ? '⚫ DEAD' : '● LIVE';
+      });
+
+      const isHlsUrl = /\.m3u8?(\?|$)/i.test(ch.url);
+      const nativeHls = player.canPlayType('application/vnd.apple.mpegurl');
+
+      const tryHlsJs = () => {
+        if (!window.Hls) {
+          if (!hlsReady) { setTimeout(() => { if (seq === tuneSeq) tryHlsJs(); }, 400); return; }
+        }
+        if (!window.Hls || !Hls.isSupported()) { tryDirect(); return; }
+        hls = new Hls({ enableWorker: true });
+        hls.loadSource(ch.url);
+        hls.attachMedia(player);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (seq !== tuneSeq) return;
+          player.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_e, d) => {
+          if (seq !== tuneSeq || !d.fatal) return;
+          showNoSignal(ch, `Stream error (${d.type}): ${d.details}`);
+        });
+      };
+
+      const tryDirect = () => {
+        player.src = ch.url;
+        player.play().catch(err => {
+          if (seq === tuneSeq) showNoSignal(ch, `Player refused to start: ${err.message}`);
+        });
+      };
+
+      if (isHlsUrl && nativeHls) tryDirect();
+      else if (isHlsUrl) tryHlsJs();
+      else tryDirect();
+    }
+
+    player.addEventListener('playing', () => {
+      hideOverlay();
+      if (player.muted) player.muted = false;
+    });
+    player.addEventListener('error', () => {
+      if (tunedNum < 0) return;
+      const ch = channels.find(c => c.num === tunedNum);
+      if (ch) showNoSignal(ch, 'The stream could not be decoded or reached.');
+    });
+
+    if (window.Hls) hlsReady = true;
+    window.addEventListener('load', () => { hlsReady = true; });
+
+    /* ================= CURATE =================
+       Hardened worker pool:
+       - pre-sharded queues: worker W owns a private array, zero
+         shared mutable state, zero shift() races
+       - probeOnce(): single channel, own AbortController, timeout
+         ALWAYS resolves — success, failure, timeout, or abort all
+         return a definite boolean
+       - worker loop: increments exactly once per probe, updates a
+         shared counter; completion is checked AFTER every probe so
+         the final probe reliably triggers finish()
+       - finish() is idempotent and unconditional; there is no state
+         where the overlay can remain stuck */
+
+    function probeOnce(ch, stopSignal) {
+      return new Promise(resolve => {
+        let settled = false;
+        const ac = new AbortController();
+        const cleanup = () => {
+          clearTimeout(timer);
+          stopSignal?.removeEventListener('abort', onStop);
+        };
+        const done = (val) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(val);
+        };
+        const timer = setTimeout(() => { ac.abort(); done(false); }, CUR_TIMEOUT_MS);
+        const hardTimer = setTimeout(() => done(false), PROBE_HARD_MS);
+        const onStop = () => { ac.abort(); done(false); };
+        stopSignal?.addEventListener('abort', onStop, { once: true });
+
+        fetch(ch.url, {
+          method: 'GET', mode: 'cors', signal: ac.signal,
+          headers: { 'Range': 'bytes=0-1024' }
+        }).then(res => {
+          done(res.ok || res.status === 206);
+        }).catch(() => {
+          done(false);
+        }).finally(() => {
+          clearTimeout(hardTimer);
+        });
+      });
+    }
+
+    let etaTimer = null;
+
+    async function curate() {
+      if (curating) { curateAbort?.abort(); return; }
+      if (!channels.length) return;
+      curating = true;
+      curateAbort = new AbortController();
+      const signal = curateAbort.signal;
+
+      const targets = channels.slice();
+      const total = targets.length;
+      const startedAt = Date.now();
+
+      /* pre-shard: worker w gets its own private slice */
+      const shards = Array.from({ length: CUR_CONCURRENCY }, () => []);
+      targets.forEach((ch, i) => shards[i % CUR_CONCURRENCY].push(ch));
+
+      let done = 0, alive = 0, dead = 0;
+      let finished = false;
+
+      /* full-screen takeover */
+      cScreen.classList.add('on');
+      curBtn.textContent = '■ STOP';
+      curBtn.classList.add('running');
+      curTitle.textContent = 'CHANNEL CURATION IN PROGRESS';
+      curStop.style.display = '';
+      curPct.textContent = '0%';
+      curFill.style.width = '0%';
+      curTested.textContent = `0 / ${total.toLocaleString()} TESTED`;
+      curAlive.textContent = '🟢 0 ALIVE';
+      curDead.textContent = '⚫ 0 DEAD';
+      curEta.textContent = 'CALCULATING…';
+      curElapsed.textContent = '0:00';
+      curProbing.textContent = '';
+
+      const paintEta = () => {
+        const elapsed = Date.now() - startedAt;
+        curElapsed.textContent = fmtDur(elapsed);
+        curEta.textContent = done < 10
+          ? 'CALCULATING…'
+          : fmtDur((elapsed / done) * (total - done));
+      };
+      etaTimer = setInterval(paintEta, 500);
+
+      const paint = (name) => {
+        const pct = Math.round((done / total) * 100);
+        curPct.textContent = pct + '%';
+        curFill.style.width = pct + '%';
+        curTested.textContent = `${done.toLocaleString()} / ${total.toLocaleString()} TESTED`;
+        curAlive.textContent = `🟢 ${alive.toLocaleString()} ALIVE`;
+        curDead.textContent = `⚫ ${dead.toLocaleString()} DEAD`;
+        if (name) curProbing.textContent = `PROBING: ${name}`;
+      };
+
+      const finish = async (stopped) => {
+        if (finished) return;
+        finished = true;
+        clearInterval(etaTimer);
+        paint();
+        curPct.textContent = '100%';
+        curFill.style.width = '100%';
+        curTitle.textContent = stopped ? 'SCAN STOPPED' : 'SCAN COMPLETE';
+        curEta.textContent = '—';
+        curProbing.textContent = stopped
+          ? 'Stopped early — partial results kept.'
+          : `Finished in ${fmtDur(Date.now() - startedAt)}. Dead channels moved to the bottom.`;
+        curStop.textContent = '✔ DISMISS';
+
+        await new Promise(r => setTimeout(r, COMPLETE_DWELL_MS));
+
+        curating = false;
+        curBtn.textContent = '⟳ CURATE';
+        curBtn.classList.remove('running');
+        curStop.textContent = '■ STOP SCAN';
+        cScreen.classList.remove('on');
+        lastScanTs = Date.now();
+        saveCuration();
+        applyFilter(false, channels[selectedIdx]?.num ?? null);
+      };
+
+      const worker = async (shard) => {
+        for (const ch of shard) {
+          if (signal.aborted || finished) return;
+          paint(ch.name);
+          const ok = await probeOnce(ch, signal);
+          if (finished) return;
+          if (ok) { aliveSet.add(ch.num); deadSet.delete(ch.num); alive++; }
+          else    { deadSet.add(ch.num);  aliveSet.delete(ch.num); dead++; }
+          done++;
+          if (done % 3 === 0 || done === total) paint();
+          if (done >= total) { finish(false); return; }
+        }
+        // this worker's shard is exhausted; if it's the last one
+        // standing, it closes out the scan
+        if (done >= total) finish(false);
+      };
+
+      await Promise.all(shards.map(shard => worker(shard)));
+
+      // If we get here without finish() having run, the scan was
+      // stopped via abort (or finished raced by another worker).
+      if (!finished) finish(signal.aborted);
+    }
+
+    curBtn.addEventListener('click', curate);
+    curStop.addEventListener('click', () => {
+      if (curating) curateAbort?.abort();
+      else cScreen.classList.remove('on');
+    });
+
+    /* ================= KEYBOARD / REMOTE ================= */
+    document.addEventListener('keydown', (e) => {
+      if (curating) {
+        if (e.key === 'Escape') curateAbort?.abort();
+        return;
+      }
+      if (!channels.length) return;
+      if (e.key === 'ArrowDown')          { e.preventDefault(); select(selectedIdx + 1); }
+      else if (e.key === 'ArrowUp')       { e.preventDefault(); select(selectedIdx - 1); }
+      else if (e.key === 'ArrowRight')    { e.preventDefault();
+        if (selectedIdx <= 0) setGroup(activeGroup + 1); else select(selectedIdx + 7);
+      }
+      else if (e.key === 'ArrowLeft')     { e.preventDefault();
+        if (selectedIdx <= 0) setGroup(activeGroup - 1); else select(selectedIdx - 7);
+      }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tune(selectedIdx); }
+      else if (e.key === 'f' || e.key === 'F')     { e.preventDefault(); toggleFavorite(); }
+      else if (e.key === 'c' || e.key === 'C')     { e.preventDefault(); curate(); }
+    });
+
+    /* ================= BOOT ================= */
+    (async () => {
+      loadFavorites();
+      loadCuration();
+      try {
+        const res = await fetch(PLAYLIST_URL);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        allChannels = parseM3U(await res.text()).map((c, i) => ({ num: i + 1, ...c }));
+        if (!allChannels.length) throw new Error('playlist parsed to 0 channels');
+        buildGroups();
+        setGroup(0);
+      } catch (err) {
+        console.error(err);
+        srcLbl.textContent = 'PLAYLIST UNAVAILABLE';
+        gbody.innerHTML = `<div class="status err">
+          Could not load the playlist (likely network or CORS).<br><br>
+          Fix for production: serve this page from the G-IPTV server and proxy<br>
+          the playlist through it (e.g. <b>/playlist.m3u</b>) — same-origin, no CORS.
+        </div>`;
+      }
+    })();
+  </script>
+
+</body>
+</html>
