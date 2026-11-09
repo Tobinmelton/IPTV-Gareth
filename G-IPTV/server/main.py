@@ -271,6 +271,9 @@ _curate_cancel: asyncio.Event | None = None
 @app.post("/api/curate/start")
 async def curate_start(category: str = Query("ALL"), res: str = Query("__ALL__"),
                        src: int = Query(-1)):
+    """Kick off a curate scan. Returns immediately — the scan runs in the
+    background and the client polls /api/curate/status. Returning fast
+    matters for TV browsers, which kill requests they think have stalled."""
     global _curate_task, _curate_cancel
     if _curate_job["running"]:
         return JSONResponse({"ok": False, "msg": "already running"}, status_code=409)
@@ -383,6 +386,28 @@ async def curate_stop():
     if _curate_cancel:
         _curate_cancel.set()
     return {"ok": True}
+
+
+# -------- runtime-reported dead channels (geo-blocked, player-rejected…) ----
+# A channel can pass the curate probe (manifest loads, HTTP 200) yet still be
+# unplayable — geo-blocks commonly 403 the SEGMENTS, which only shows up at
+# play time. The UI reports those here so they join the dead list.
+_dead_reported: set[int] = set()
+
+
+@app.post("/api/dead")
+async def report_dead(request: Request):
+    body = await request.json()
+    num = int(body.get("num", 0))
+    if num:
+        _dead_reported.add(num)
+        _curate_job["dead_nums"] = sorted(set(_curate_job["dead_nums"]) | {num})
+    return {"ok": True, "reported_dead": len(_dead_reported)}
+
+
+@app.get("/api/dead")
+async def list_dead():
+    return JSONResponse(sorted(_dead_reported))
 
 
 @app.get("/stream", include_in_schema=False)

@@ -462,6 +462,22 @@
       showOverlay(`<div class="med">TUNING CH ${String(ch.num).padStart(3,'0')}…</div>
                    <div class="small">${esc(ch.name)}</div>`);
     }
+    /* ---- runtime-dead reporting ----
+       A channel can pass curate (manifest 200) yet still be unplayable —
+       geo-blocks often 403 the SEGMENTS at play time. When the player
+       fails, report it to the server and treat it as dead locally. */
+    function markDead(ch) {
+      if (deadSet.has(ch.num)) return;
+      deadSet.add(ch.num);
+      aliveSet.delete(ch.num);
+      saveCuration();
+      fetch("/api/dead", { method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ num: ch.num }) }).catch(()=>{});
+      buildGroups(); renderGroupSelect();   // DEAD count updates
+      renderGuide();
+    }
+
     function showNoSignal(ch, why) {
       showOverlay(`<div class="big">NO SIGNAL</div>
                    <div class="med">CH ${String(ch.num).padStart(3,'0')} · ${esc(ch.name)}</div>
@@ -787,6 +803,7 @@
         });
         hls.on(Hls.Events.ERROR, (_e, d) => {
           if (seq !== tuneSeq || !d.fatal) return;
+          markDead(ch);
           showNoSignal(ch, `Stream error (${d.type}): ${d.details}`);
         });
       };
@@ -794,7 +811,7 @@
       const tryDirect = () => {
         player.src = proxied;
         player.play().catch(err => {
-          if (seq === tuneSeq) showNoSignal(ch, `Player refused to start: ${err.message}`);
+          if (seq === tuneSeq) { markDead(ch); showNoSignal(ch, `Player refused to start: ${err.message}`); }
         });
       };
 
@@ -810,7 +827,7 @@
     player.addEventListener('error', () => {
       if (tunedNum < 0) return;
       const ch = channels.find(c => c.num === tunedNum);
-      if (ch) showNoSignal(ch, 'The stream could not be decoded or reached.');
+      if (ch) { markDead(ch); showNoSignal(ch, 'The stream could not be decoded or reached.'); }
     });
 
     if (window.Hls) hlsReady = true;
@@ -833,22 +850,11 @@
       stopPlayback();          // mute any tuned channel before scanning
       renderGuide();           // clear the ▶ TUNED marker
 
-      const g = groups[activeGroup];
-      const qs = `?category=${encodeURIComponent(g.name)}&res=${encodeURIComponent(activeRes)}&src=${activeSource}`;
-
-      let start;
-      try {
-        start = await (await fetch("/api/curate/start" + qs, { method: "POST" })).json();
-      } catch (err) {
-        curTitle.textContent = 'SCAN FAILED';
-        curProbing.textContent = `Server error: ${err.message}`;
-        return;
-      }
-      if (!start.ok) { curProbing.textContent = start.msg || 'Could not start scan'; return; }
-
+      // Show the console IMMEDIATELY — TV browsers kill requests they
+      // think have stalled, so we never wait on the start call. Fire it,
+      // then drive everything from the status poller.
       curating = true;
       scanStartedAt = Date.now();
-
       cScreen.classList.add('on');
       curBtn.textContent = '■ STOP';
       curBtn.classList.add('running');
@@ -858,12 +864,22 @@
       curPct.textContent = '0%';
       curFill.classList.remove('done');
       curFill.style.width = '0%';
-      curTested.textContent = `0 / ${start.total.toLocaleString()} TESTED`;
-      curAlive.textContent = '🟢 0 ALIVE';
-      curDead.textContent = '⚫ 0 DEAD';
+      curTested.textContent = 'STARTING…';
+      curAlive.textContent = '🟢 —';
+      curDead.textContent = '⚫ —';
       curElapsed.textContent = '0:00';
       curEta.textContent = 'CALCULATING…';
-      curProbing.textContent = '';
+      curProbing.textContent = 'Contacting the server…';
+
+      const g = groups[activeGroup];
+      const qs = `?category=${encodeURIComponent(g.name)}&res=${encodeURIComponent(activeRes)}&src=${activeSource}`;
+
+      fetch("/api/curate/start" + qs, { method: "POST" })
+        .then(r => r.json())
+        .then(start => {
+          if (!start.ok) { curProbing.textContent = start.msg || 'Could not start scan'; }
+        })
+        .catch(() => { /* poller will keep trying; server may already be running */ });
 
       pollTimer = setInterval(pollStatus, 500);
     }
@@ -886,6 +902,17 @@
       curEta.textContent = j.done < 10
         ? 'CALCULATING…'
         : fmtDur((elapsed / j.done) * (j.total - j.done));
+
+      // stale-job guard: server never started (or already finished an
+      // older job) — bail instead of polling forever on a dead job
+      if (!j.running && !j.finished && elapsed > 12000) {
+        clearInterval(pollTimer);
+        curTitle.textContent = 'SCAN FAILED TO START';
+        curProbing.textContent = 'The server did not begin the scan. Try again.';
+        curStop.textContent = '✔ DISMISS';
+        setTimeout(endCurate, 2200);
+        return;
+      }
 
       if (!j.running && j.finished) {
         clearInterval(pollTimer);
@@ -956,6 +983,15 @@
         try {
           const sres = await fetch(API_SOURCES);
           if (sres.ok) sources = await sres.json();
+        } catch { /* older server — fine */ }
+        // runtime-reported dead channels (geo-blocked etc.) from the server
+        try {
+          const dres = await fetch("/api/dead");
+          if (dres.ok) {
+            const reported = await dres.json();
+            for (const n of reported) { deadSet.add(n); aliveSet.delete(n); }
+            if (reported.length) saveCuration();
+          }
         } catch { /* older server — fine */ }
         buildGroups();
         setGroup(0);
