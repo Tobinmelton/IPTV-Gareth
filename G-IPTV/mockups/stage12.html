@@ -2,26 +2,25 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>G-IPTV — Stage 10</title>
+<title>G-IPTV</title>
 <style>
-  /* ============ STAGE 10 : CABLE BOX 2003 + REAL M3U ============
-     Based on stage09. Changes in Stage 10:
-       - BUGFIX: scan hit 100% then "kept scanning". Root cause:
-         workers bailed on the finished/aborted flag WITHOUT counting
-         their in-flight probe, so the counter could never close out
-         and straggler probes kept reporting. Fix: workers no longer
-         check finished mid-loop; every started probe is counted
-         exactly once; completion is detected per-probe; finish() is
-         the single unconditional exit and always runs.
-       - NEW: RESOLUTION drop-down to the right of CATEGORY, parsed
-         from resolution tags in channel names e.g. (1080p) (720p)
-         (4K). Filters within the current category view.
-     Carried over (unchanged):
-       - Full-screen curate console (locked design), results card
-       - Category drop-down, CURATE button, favorites, dead-at-bottom
-         ordering, DEAD category, localStorage caching, playback
-       - Layout: info top-left · TV fills panel (4:3) top-right
-         · full-width dense scrollable guide bottom, 300px CH col */
+  /* ============ STAGE 12 : SERVER-EDITION CABLE BOX 2003 ============
+     Served by the G-IPTV server (server/main.py). Everything is
+     same-origin:
+       - channels come from GET /api/channels (server-parsed JSON)
+       - playback goes through GET /stream?url=... (proxy: no CORS,
+         no mixed-content, bypasses hotlink protection)
+       - CURATE calls GET /api/curate (server-side probes — accurate,
+         no browser sandbox limitations)
+       - GET /api/guide supplies now/next program titles when an
+         XMLTV source is configured on the server
+     UI carried over from stage11 (locked design):
+       - Info top-left · TV fills panel (4:3) top-right · full-width
+         dense guide bottom with wide 300px CH column
+       - Category + resolution drop-downs, favorites (F / button),
+         dead-at-bottom ordering, DEAD category, localStorage state
+       - Full-screen curate console (server-side scan: indeterminate
+         pulse + elapsed, results card on completion) */
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { height:100%; }
   body {
@@ -69,8 +68,6 @@
   }
   .gsel:focus { outline:2px solid #ffd94d; outline-offset:1px; }
   .gsel option { background:#101f5e; color:#eaf0ff; font-weight:normal; }
-  .gsel option[data-faves] { color:#ffd94d; }
-  .gsel option[data-dead]  { color:#c98a8a; }
   .rselwrap { position:relative; }
   .rsel {
     appearance:none; -webkit-appearance:none; cursor:pointer;
@@ -110,9 +107,8 @@
     font-size:28px; letter-spacing:8px; font-weight:bold; color:#9fc0ff;
   }
   .curate-screen .pct {
-    font-size:130px; font-weight:bold; line-height:1; color:#ffd94d;
+    font-size:110px; font-weight:bold; line-height:1; color:#ffd94d;
     text-shadow:0 0 30px rgba(255,182,46,.45), 3px 3px 0 #000;
-    font-variant-numeric:tabular-nums;
   }
   .curate-screen .meter {
     width:min(72vw, 900px); height:44px; border:3px solid #5c7fe0; border-radius:22px;
@@ -120,11 +116,14 @@
     box-shadow:inset 0 2px 8px #000, 0 0 24px rgba(60,100,220,.35);
   }
   .curate-screen .meter .fill {
-    height:100%; width:0%;
-    background:linear-gradient(90deg,#ffd94d,#ff9d2e);
+    height:100%; width:100%;
+    background:linear-gradient(90deg,#ffd94d,#ff9d2e,#ffd94d);
+    background-size:200% 100%;
     box-shadow:0 0 18px rgba(255,182,46,.7);
-    transition:width .2s;
+    animation:sweep 1.4s linear infinite;
   }
+  @keyframes sweep { 0%{background-position:0% 0;} 100%{background-position:200% 0;} }
+  .curate-screen .meter .fill.done { animation:none; background:linear-gradient(90deg,#ffd94d,#ff9d2e); }
   .curate-screen .counts {
     display:flex; gap:42px; font-size:24px; font-weight:bold; font-variant-numeric:tabular-nums;
   }
@@ -136,7 +135,7 @@
   }
   .eta b { color:#fff; }
   .curate-screen .nowprobing {
-    font-size:15px; color:#7d93d8; max-width:80vw;
+    font-size:15px; color:#7d93d8; max-width:80vw; text-align:center;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
   .curate-screen .stopbtn {
@@ -296,7 +295,7 @@
 
   <div class="topbar">
     <span class="brand">◆ G-IPTV DIGITAL CABLE</span>
-    <span id="srcLabel">LOADING PLAYLIST…</span>
+    <span id="srcLabel">LOADING…</span>
     <span class="clock" id="clock">—</span>
   </div>
 
@@ -316,13 +315,11 @@
       <div class="channum" id="infoNum">CH —</div>
       <div class="channame" id="infoGroup">NO SIGNAL</div>
       <h1 id="infoTitle">Select a channel from the guide</h1>
-      <div class="meta" id="infoMeta"><span>playlist loading…</span></div>
+      <div class="meta" id="infoMeta"><span>loading…</span></div>
       <p class="desc" id="infoDesc">
-        The channel guide below is loaded from a real-world M3U playlist.
-        Filter by category and resolution, click or press Enter to tune,
-        and press <b>F</b> to tag a favorite. <b>CURATE</b> tests every channel
-        in the current view — dead channels sink to the bottom, and the
-        DEAD category lists only them.
+        Served by your G-IPTV home server. Pick a category and resolution,
+        click or press Enter to tune, <b>F</b> for favorites. <b>CURATE</b> runs
+        a server-side availability scan of the current view.
       </p>
       <div class="badges" id="infoBadges"></div>
       <div class="progress"></div>
@@ -353,42 +350,41 @@
   <section class="guide">
     <div class="ghead">
       <div class="cell">CH</div>
-      <div class="cell">NOW</div><div class="cell">+30 MIN</div>
-      <div class="cell">+60 MIN</div><div class="cell">+90 MIN</div>
+      <div class="cell">NOW</div><div class="cell">NEXT</div>
+      <div class="cell">LATER</div><div class="cell">STATUS</div>
     </div>
     <div class="gbody" id="gbody">
-      <div class="status">Fetching playlist…</div>
+      <div class="status">Loading channels from server…</div>
     </div>
   </section>
 
   <!-- FULL-SCREEN CURATE OVERLAY -->
   <div class="curate-screen" id="curateScreen">
-    <div class="title" id="curTitle">CHANNEL CURATION IN PROGRESS</div>
-    <div class="pct" id="curPct">0%</div>
+    <div class="title" id="curTitle">SERVER-SIDE CURATION</div>
+    <div class="pct" id="curPct">SCANNING</div>
     <div class="meter"><div class="fill" id="curFill"></div></div>
     <div class="counts">
-      <span class="tested" id="curTested">0 / 0 TESTED</span>
-      <span class="alive" id="curAlive">🟢 0 ALIVE</span>
-      <span class="dead" id="curDead">⚫ 0 DEAD</span>
+      <span class="tested" id="curTested">—</span>
+      <span class="alive" id="curAlive">🟢 —</span>
+      <span class="dead" id="curDead">⚫ —</span>
     </div>
     <div class="eta">
       <span>ELAPSED <b id="curElapsed">0:00</b></span>
       <span>EST. REMAINING <b id="curEta">—</b></span>
     </div>
-    <div class="nowprobing" id="curProbing"></div>
-    <button class="stopbtn" id="curStop">■ STOP SCAN</button>
+    <div class="nowprobing" id="curProbing">The server is probing every channel in the current view…</div>
+    <button class="stopbtn" id="curStop">✖ CANCEL</button>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
   <script>
-    /* ================= CONFIG ================= */
-    const PLAYLIST_URL = "https://iptv-org.github.io/iptv/index.m3u";
-    const FAV_KEY     = "giptv.favorites";
-    const CUR_KEY     = "giptv.curation";
-    const CUR_CONCURRENCY = 40;
-    const CUR_TIMEOUT_MS  = 6000;
-    const PROBE_HARD_MS   = 9000;
-    const COMPLETE_DWELL_MS = 2500;
+    /* ================= SERVER ENDPOINTS (same-origin) ================= */
+    const API_CHANNELS = "/api/channels";
+    const API_GUIDE    = "/api/guide";
+    const streamUrl = (u) => "/stream?url=" + encodeURIComponent(u);
+
+    const FAV_KEY = "giptv.favorites";
+    const CUR_KEY = "giptv.curation";
     const RES_ALL = "__ALL__";
 
     /* ================= STATE ================= */
@@ -397,15 +393,15 @@
     let groups = [];
     let activeGroup = 0;
     let activeRes = RES_ALL;
-    let resOptions = [];       // [{tag, count}]
+    let resOptions = [];
     let selectedIdx = -1;
     let tunedNum = -1;
     let favorites = new Set();
     let deadSet = new Set();
     let aliveSet = new Set();
     let lastScanTs = 0;
+    let guideData = {};          // tvg-id -> {now, next}
     let curating = false;
-    let curateAbort = null;
     let hls = null;
     let tuneSeq = 0;
     let hlsReady = false;
@@ -429,7 +425,6 @@
     const curAlive  = document.getElementById('curAlive');
     const curDead   = document.getElementById('curDead');
     const curElapsed= document.getElementById('curElapsed');
-    const curEta    = document.getElementById('curEta');
     const curProbing= document.getElementById('curProbing');
     const curStop   = document.getElementById('curStop');
 
@@ -503,41 +498,19 @@
     }
     tickClock(); setInterval(tickClock, 1000 * 15);
 
-    /* ================= M3U PARSING ================= */
-    function parseM3U(text) {
-      const lines = text.split(/\r?\n/);
-      const out = [];
-      let meta = null;
-      for (const raw of lines) {
-        const line = raw.trim();
-        if (!line || line === '#EXTM3U') continue;
-        if (line.startsWith('#EXTINF')) {
-          meta = { id:'', name:'', logo:'', group:'', extras:[] };
-          const attrRe = /([\w-]+)="([^"]*)"/g; let m;
-          while ((m = attrRe.exec(line)) !== null) {
-            const k = m[1].toLowerCase(), v = m[2];
-            if (k === 'tvg-id') meta.id = v;
-            else if (k === 'tvg-logo') meta.logo = v;
-            else if (k === 'group-title') meta.group = v;
-            else meta.extras.push(`${k}=${v}`);
-          }
-          const comma = line.indexOf(',');
-          meta.name = comma >= 0 ? line.slice(comma + 1).trim() : 'Unknown';
-        } else if (line.startsWith('#')) {
-          // #EXTVLCOPT and friends — skip
-        } else if (meta) {
-          meta.url = line;
-          out.push(meta);
-          meta = null;
-        }
-      }
-      return out;
-    }
-
-    /* ---- resolution tag from the channel name, e.g. "(1080p)" ---- */
+    /* ================= RESOLUTION ================= */
     function resTagOf(name) {
       const m = name.match(/\(([^)]*(?:\d{3,4}p|4k|uhd|hd|sd)[^)]*)\)/i);
       return m ? m[1].toUpperCase().replace(/\s+/g,'') : null;
+    }
+    function resRank(tag) {
+      if (!tag) return -1;
+      if (/4K|UHD|2160/i.test(tag)) return 4000;
+      const m = tag.match(/(\d{3,4})\s*P/i);
+      if (m) return parseInt(m[1], 10);
+      if (/^HD/i.test(tag)) return 720;
+      if (/^SD/i.test(tag)) return 480;
+      return 0;
     }
 
     /* ================= GROUPS / DROP-DOWNS ================= */
@@ -562,15 +535,12 @@
         opt.value = i;
         const icon = g.name === 'FAVES' ? '★ ' : g.name === 'DEAD' ? '⚫ ' : '';
         opt.textContent = `${icon}${g.name.toUpperCase()} (${g.count.toLocaleString()})`;
-        if (g.name === 'FAVES') opt.setAttribute('data-faves', '');
-        if (g.name === 'DEAD')  opt.setAttribute('data-dead', '');
         gsel.appendChild(opt);
       });
       gsel.value = String(activeGroup);
     }
     gsel.addEventListener('change', () => { activeRes = RES_ALL; setGroup(+gsel.value); });
 
-    /* ---- resolution drop-down, rebuilt for the current category ---- */
     function buildResOptions(base) {
       const counts = new Map();
       for (const ch of base) {
@@ -578,9 +548,8 @@
         if (tag) counts.set(tag, (counts.get(tag) || 0) + 1);
       }
       resOptions = [...counts.entries()]
-        .sort((a, b) => b[1] - a[1])
+        .sort((a, b) => resRank(b[0]) - resRank(a[0]))
         .map(([tag, count]) => ({ tag, count }));
-      // keep selection valid
       if (activeRes !== RES_ALL && !resOptions.some(r => r.tag === activeRes)) {
         activeRes = RES_ALL;
       }
@@ -624,7 +593,6 @@
       else if (g.name === 'DEAD')  base = allChannels.filter(c => deadSet.has(c.num));
       else base = allChannels.filter(c => (c.group || 'Undefined') === g.name);
 
-      // resolution filter applies within the category view
       buildResOptions(base);
       if (activeRes !== RES_ALL) {
         base = base.filter(c => resTagOf(c.name) === activeRes);
@@ -655,6 +623,18 @@
     }
 
     /* ================= GUIDE RENDER ================= */
+    function guideCells(ch, dead) {
+      const g = guideData[ch.id];
+      if (dead) return `<div class="cell">⚫</div><div class="cell">⚫</div><div class="cell">⚫</div><div class="cell">⚫ DEAD</div>`;
+      if (g) return `
+        <div class="cell">${esc(g.now || '● LIVE')}</div>
+        <div class="cell">${esc(g.next || '—')}</div>
+        <div class="cell">—</div>
+        <div class="cell">${aliveSet.has(ch.num) ? '🟢' : '● LIVE'}</div>`;
+      return `<div class="cell">● LIVE</div><div class="cell">● LIVE</div>
+              <div class="cell">● LIVE</div><div class="cell">${aliveSet.has(ch.num) ? '🟢' : '● LIVE'}</div>`;
+    }
+
     function renderGuide() {
       gbody.innerHTML = '';
       const frag = document.createDocumentFragment();
@@ -663,7 +643,6 @@
         const dead = deadSet.has(ch.num);
         const row = document.createElement('div');
         row.className = 'row' + (dead && !fav ? ' deadrow' : ''); row.dataset.idx = i;
-        const statusDot = dead ? '⚫' : aliveSet.has(ch.num) ? '🟢' : '';
         row.innerHTML = `
           <div class="cell chan">
             ${fav ? '<span class="star">★</span>' : ''}
@@ -671,10 +650,9 @@
             <span class="num">${String(ch.num).padStart(3,'0')}</span>
             <span class="name">${esc(ch.name)}</span>
           </div>
-          <div class="cell livecell">${tunedNum===ch.num ? '▶ TUNED' : (dead ? '⚫ DEAD' : '● LIVE')}</div>
-          <div class="cell">${dead ? '⚫' : '● LIVE'}</div>
-          <div class="cell">${dead ? '⚫' : '● LIVE'}</div>
-          <div class="cell">${statusDot || '● LIVE'}</div>`;
+          ${tunedNum===ch.num
+            ? `<div class="cell livecell">▶ TUNED</div><div class="cell"></div><div class="cell"></div><div class="cell"></div>`
+            : guideCells(ch, dead)}`;
         row.addEventListener('click', () => tune(i));
         frag.appendChild(row);
       });
@@ -692,14 +670,16 @@
       const fav = favorites.has(ch.num);
       const dead = deadSet.has(ch.num);
       const res = resTagOf(ch.name);
+      const g = guideData[ch.id];
       document.getElementById('infoNum').textContent   = 'CH ' + String(ch.num).padStart(3,'0');
       document.getElementById('infoGroup').textContent = (ch.group || 'UNDEFINED').toUpperCase();
-      document.getElementById('infoTitle').textContent = ch.name;
+      document.getElementById('infoTitle').textContent = g?.now || ch.name;
       document.getElementById('infoMeta').innerHTML =
-        `<span>${esc(ch.id || 'no tvg-id')}</span><span>•</span><span>HLS / IP stream</span>`;
+        `<span>${esc(ch.name)}</span><span>•</span><span>${esc(ch.id || 'no tvg-id')}</span>`;
       document.getElementById('infoDesc').textContent =
-        `${ch.name} — ${ch.group || 'undefined'} channel from the loaded M3U playlist.` +
-        (dead ? ' Last curation scan marked this stream unreachable.' : '');
+        (g ? `Now: ${g.now || '—'} · Next: ${g.next || '—'}. ` : '') +
+        `${ch.name} — ${ch.group || 'undefined'} channel.` +
+        (dead ? ' Last scan marked this stream unreachable.' : '');
       document.getElementById('infoBadges').innerHTML =
         `<span class="badge">${esc((ch.group || 'GENERAL').toUpperCase())}</span>` +
         (res ? `<span class="badge">${esc(res)}</span>` : '') +
@@ -714,7 +694,7 @@
       }
     }
 
-    /* ================= TUNING / PLAYBACK ================= */
+    /* ================= TUNING / PLAYBACK (via server proxy) ================= */
     function tune(i) {
       select(i);
       const ch = channels[i];
@@ -729,13 +709,9 @@
       showTuning(ch);
       liveBdg.style.display = 'block';
       osd.textContent = `CH ${String(ch.num).padStart(3,'0')} · ${ch.name}`;
+      renderGuide();   // refresh ▶ TUNED marker
 
-      gbody.querySelectorAll('.row').forEach(r => {
-        const c = channels[+r.dataset.idx];
-        r.children[1].textContent = c.num === tunedNum ? '▶ TUNED'
-          : deadSet.has(c.num) ? '⚫ DEAD' : '● LIVE';
-      });
-
+      const proxied = streamUrl(ch.url);
       const isHlsUrl = /\.m3u8?(\?|$)/i.test(ch.url);
       const nativeHls = player.canPlayType('application/vnd.apple.mpegurl');
 
@@ -745,7 +721,7 @@
         }
         if (!window.Hls || !Hls.isSupported()) { tryDirect(); return; }
         hls = new Hls({ enableWorker: true });
-        hls.loadSource(ch.url);
+        hls.loadSource(proxied);
         hls.attachMedia(player);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (seq !== tuneSeq) return;
@@ -758,7 +734,7 @@
       };
 
       const tryDirect = () => {
-        player.src = ch.url;
+        player.src = proxied;
         player.play().catch(err => {
           if (seq === tuneSeq) showNoSignal(ch, `Player refused to start: ${err.message}`);
         });
@@ -782,155 +758,114 @@
     if (window.Hls) hlsReady = true;
     window.addEventListener('load', () => { hlsReady = true; });
 
-    /* ================= CURATE =================
-       Hardened pool, completion guaranteed:
-       - pre-sharded per-worker queues; zero shared mutable queue
-       - probeOnce(): every outcome settles exactly once
-       - workers count EVERY started probe, never bail mid-shard on
-         the finished flag (that was the past-100% bug)
-       - completion detected per-probe; finish() is the single exit
-         and always runs, stopped or complete */
-
-    function probeOnce(ch, stopSignal) {
-      return new Promise(resolve => {
-        let settled = false;
-        const ac = new AbortController();
-        const cleanup = () => {
-          clearTimeout(timer);
-          clearTimeout(hardTimer);
-          stopSignal?.removeEventListener('abort', onStop);
-        };
-        const done = (val) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          resolve(val);
-        };
-        const timer = setTimeout(() => { ac.abort(); done(false); }, CUR_TIMEOUT_MS);
-        const hardTimer = setTimeout(() => done(false), PROBE_HARD_MS);
-        const onStop = () => { ac.abort(); done(false); };
-        stopSignal?.addEventListener('abort', onStop, { once: true });
-
-        fetch(ch.url, {
-          method: 'GET', mode: 'cors', signal: ac.signal,
-          headers: { 'Range': 'bytes=0-1024' }
-        }).then(res => {
-          done(res.ok || res.status === 206);
-        }).catch(() => {
-          done(false);
-        });
-      });
-    }
-
-    let etaTimer = null;
+    /* ================= CURATE (server-side job + live polling) =================
+       POST /api/curate/start kicks off a background job on the server;
+       we poll GET /api/curate/status every 500ms for live counts, ETA
+       and the channel being probed. STOP POSTs /api/curate/stop. */
+    let pollTimer = null;
+    let scanStartedAt = 0;
 
     async function curate() {
-      if (curating) { curateAbort?.abort(); return; }
+      if (curating) {          // button acts as STOP
+        try { await fetch("/api/curate/stop", { method: "POST" }); } catch {}
+        return;
+      }
       if (!channels.length) return;
+
+      const g = groups[activeGroup];
+      const qs = `?category=${encodeURIComponent(g.name)}&res=${encodeURIComponent(activeRes)}`;
+
+      let start;
+      try {
+        start = await (await fetch("/api/curate/start" + qs, { method: "POST" })).json();
+      } catch (err) {
+        curTitle.textContent = 'SCAN FAILED';
+        curProbing.textContent = `Server error: ${err.message}`;
+        return;
+      }
+      if (!start.ok) { curProbing.textContent = start.msg || 'Could not start scan'; return; }
+
       curating = true;
-      curateAbort = new AbortController();
-      const signal = curateAbort.signal;
+      scanStartedAt = Date.now();
 
-      const targets = channels.slice();
-      const total = targets.length;
-      const startedAt = Date.now();
-
-      const shards = Array.from({ length: CUR_CONCURRENCY }, () => []);
-      targets.forEach((ch, i) => shards[i % CUR_CONCURRENCY].push(ch));
-
-      let done = 0, alive = 0, dead = 0;
-      let finished = false;
-
-      /* full-screen takeover */
       cScreen.classList.add('on');
       curBtn.textContent = '■ STOP';
       curBtn.classList.add('running');
       curTitle.textContent = 'CHANNEL CURATION IN PROGRESS';
       curStop.style.display = '';
-      curStop.textContent = '■ STOP SCAN';
+      curStop.textContent = '✖ CANCEL';
       curPct.textContent = '0%';
+      curFill.classList.remove('done');
       curFill.style.width = '0%';
-      curTested.textContent = `0 / ${total.toLocaleString()} TESTED`;
+      curTested.textContent = `0 / ${start.total.toLocaleString()} TESTED`;
       curAlive.textContent = '🟢 0 ALIVE';
       curDead.textContent = '⚫ 0 DEAD';
-      curEta.textContent = 'CALCULATING…';
       curElapsed.textContent = '0:00';
+      curEta.textContent = 'CALCULATING…';
       curProbing.textContent = '';
 
-      const paintEta = () => {
-        const elapsed = Date.now() - startedAt;
-        curElapsed.textContent = fmtDur(elapsed);
-        curEta.textContent = done < 10
-          ? 'CALCULATING…'
-          : fmtDur((elapsed / done) * (total - done));
-      };
-      etaTimer = setInterval(paintEta, 500);
+      pollTimer = setInterval(pollStatus, 500);
+    }
 
-      const paint = (name) => {
-        const pct = Math.min(100, Math.round((done / total) * 100));
-        curPct.textContent = pct + '%';
-        curFill.style.width = pct + '%';
-        curTested.textContent = `${done.toLocaleString()} / ${total.toLocaleString()} TESTED`;
-        curAlive.textContent = `🟢 ${alive.toLocaleString()} ALIVE`;
-        curDead.textContent = `⚫ ${dead.toLocaleString()} DEAD`;
-        if (name) curProbing.textContent = `PROBING: ${name}`;
-      };
+    async function pollStatus() {
+      let j;
+      try { j = await (await fetch("/api/curate/status")).json(); }
+      catch { return; }                                    // transient, next tick retries
 
-      const finish = async (stopped) => {
-        if (finished) return;
-        finished = true;
-        clearInterval(etaTimer);
-        done = Math.min(done, total);
-        paint();
+      const pct = j.total ? Math.min(100, Math.round((j.done / j.total) * 100)) : 0;
+      curPct.textContent = pct + '%';
+      curFill.style.width = pct + '%';
+      curTested.textContent = `${j.done.toLocaleString()} / ${j.total.toLocaleString()} TESTED`;
+      curAlive.textContent = `🟢 ${j.alive.toLocaleString()} ALIVE`;
+      curDead.textContent = `⚫ ${j.dead.toLocaleString()} DEAD`;
+      curProbing.textContent = j.current ? `PROBING: ${j.current}` : '';
+
+      const elapsed = Date.now() - scanStartedAt;
+      curElapsed.textContent = fmtDur(elapsed);
+      curEta.textContent = j.done < 10
+        ? 'CALCULATING…'
+        : fmtDur((elapsed / j.done) * (j.total - j.done));
+
+      if (!j.running && j.finished) {
+        clearInterval(pollTimer);
+        for (const n of j.alive_nums) { aliveSet.add(n); deadSet.delete(n); }
+        for (const n of j.dead_nums)  { deadSet.add(n);  aliveSet.delete(n); }
+        lastScanTs = j.ts * 1000;
+        saveCuration();
+
         curPct.textContent = '100%';
         curFill.style.width = '100%';
-        curTitle.textContent = stopped ? 'SCAN STOPPED' : 'SCAN COMPLETE';
+        curFill.classList.add('done');
+        curTitle.textContent = j.stopped ? 'SCAN STOPPED' : 'SCAN COMPLETE';
         curEta.textContent = '—';
-        curProbing.textContent = stopped
+        curProbing.textContent = j.stopped
           ? 'Stopped early — partial results kept.'
-          : `Finished in ${fmtDur(Date.now() - startedAt)}. Dead channels moved to the bottom.`;
+          : `Finished in ${fmtDur(Date.now() - scanStartedAt)}. Dead channels moved to the bottom.`;
         curStop.textContent = '✔ DISMISS';
 
-        await new Promise(r => setTimeout(r, COMPLETE_DWELL_MS));
+        setTimeout(endCurate, 2500);
+      }
+    }
 
-        curating = false;
-        curBtn.textContent = '⟳ CURATE';
-        curBtn.classList.remove('running');
-        cScreen.classList.remove('on');
-        lastScanTs = Date.now();
-        saveCuration();
-        applyFilter(false, channels[selectedIdx]?.num ?? null);
-      };
-
-      const worker = async (shard) => {
-        for (const ch of shard) {
-          // stop means stop starting NEW probes; an in-flight probe
-          // is always allowed to land and be counted
-          if (signal.aborted) return;
-          if (!finished && done % 7 === 0) paint(ch.name);
-          const ok = await probeOnce(ch, signal);
-          if (ok) { aliveSet.add(ch.num); deadSet.delete(ch.num); alive++; }
-          else    { deadSet.add(ch.num);  aliveSet.delete(ch.num); dead++; }
-          done++;
-          if (!finished && (done % 3 === 0 || done === total)) paint();
-          if (done >= total) { finish(false); return; }
-        }
-      };
-
-      await Promise.all(shards.map(shard => worker(shard)));
-      if (!finished) finish(signal.aborted);
+    function endCurate() {
+      curating = false;
+      curBtn.textContent = '⟳ CURATE';
+      curBtn.classList.remove('running');
+      cScreen.classList.remove('on');
+      curFill.classList.remove('done');
+      applyFilter(false, channels[selectedIdx]?.num ?? null);
     }
 
     curBtn.addEventListener('click', curate);
-    curStop.addEventListener('click', () => {
-      if (curating) curateAbort?.abort();
-      else cScreen.classList.remove('on');
+    curStop.addEventListener('click', async () => {
+      if (curating) { try { await fetch("/api/curate/stop", { method: "POST" }); } catch {} }
+      else endCurate();
     });
 
     /* ================= KEYBOARD / REMOTE ================= */
     document.addEventListener('keydown', (e) => {
       if (curating) {
-        if (e.key === 'Escape') curateAbort?.abort();
+        if (e.key === 'Escape') { e.preventDefault(); fetch("/api/curate/stop", { method: "POST" }).catch(()=>{}); }
         return;
       }
       if (!channels.length) return;
@@ -952,19 +887,26 @@
       loadFavorites();
       loadCuration();
       try {
-        const res = await fetch(PLAYLIST_URL);
+        const res = await fetch(API_CHANNELS);
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        allChannels = parseM3U(await res.text()).map((c, i) => ({ num: i + 1, ...c }));
-        if (!allChannels.length) throw new Error('playlist parsed to 0 channels');
+        allChannels = await res.json();
+        if (!allChannels.length) throw new Error('server returned 0 channels');
         buildGroups();
         setGroup(0);
+        // guide data is best-effort (requires GIPTV_EPG_URL on the server)
+        try {
+          const gres = await fetch(API_GUIDE);
+          if (gres.ok) {
+            guideData = await gres.json();
+            if (Object.keys(guideData).length) renderGuide();
+          }
+        } catch { /* no guide configured — fine */ }
       } catch (err) {
         console.error(err);
-        srcLbl.textContent = 'PLAYLIST UNAVAILABLE';
+        srcLbl.textContent = 'SERVER UNAVAILABLE';
         gbody.innerHTML = `<div class="status err">
-          Could not load the playlist (likely network or CORS).<br><br>
-          Fix for production: serve this page from the G-IPTV server and proxy<br>
-          the playlist through it (e.g. <b>/playlist.m3u</b>) — same-origin, no CORS.
+          Could not load channels from the G-IPTV server.<br>
+          Is <b>server/main.py</b> running?
         </div>`;
       }
     })();
