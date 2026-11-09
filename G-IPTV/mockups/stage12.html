@@ -135,8 +135,14 @@
   }
   .eta b { color:#fff; }
   .curate-screen .nowprobing {
-    font-size:15px; color:#7d93d8; max-width:80vw; text-align:center;
+    font-size:30px; font-weight:bold; color:#c9d8ff; max-width:85vw; text-align:center;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    letter-spacing:1px; text-shadow:2px 2px 0 #000;
+    transition:opacity .12s;
+  }
+  .curate-screen .nowprobing::before {
+    content:"PROBING ▸"; display:block; font-size:13px; letter-spacing:5px;
+    color:#5c7fe0; margin-bottom:6px; font-weight:bold;
   }
   .curate-screen .stopbtn {
     margin-top:6px; padding:12px 44px; border-radius:12px; cursor:pointer;
@@ -837,7 +843,7 @@
       curTested.textContent = `${j.done.toLocaleString()} / ${j.total.toLocaleString()} TESTED`;
       curAlive.textContent = `🟢 ${j.alive.toLocaleString()} ALIVE`;
       curDead.textContent = `⚫ ${j.dead.toLocaleString()} DEAD`;
-      curProbing.textContent = j.current ? `PROBING: ${j.current}` : '';
+      curProbing.textContent = j.current ? j.current : '';
 
       const elapsed = Date.now() - scanStartedAt;
       curElapsed.textContent = fmtDur(elapsed);
