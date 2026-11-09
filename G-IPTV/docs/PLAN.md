@@ -12,12 +12,31 @@ navigation for a dense guide, and can't be packaged.
 
 Server stays a headless LAN service on a PC; devices are thin clients.
 
-## Fullscreen (just shipped)
+## Fullscreen (shipped)
 
 - **⛶ FULLSCREEN button** on the control strip, or press **U**.
-- Full browser fullscreen (Chrome/Edge/Firefox on PC) and, inside the APK
-  WebView, it maps to immersive mode (status/nav bars hidden).
-- In fullscreen the app goes edge-to-edge (background flush, tighter margins).
+- **Video-only:** only the `.tvwrap` element goes fullscreen — info panel and
+  guide hide, TV keeps its 4:3 ratio centered on black. Not whole-app.
+
+## APK architecture — LOCKED (Option 1)
+
+**Thin client / server-required.** The APK is a Capacitor WebView shell that
+loads the UI from the G-IPTV server. The Onn 4K does no heavy work.
+
+- **Server required:** the PC running `giptv` must be on. All data, proxying,
+  and curate happen there; the APK just renders + plays.
+- **Why this wins:** the `/stream` proxy is what makes flaky public streams
+  usable (CORS / hotlink bypass); curate is too heavy for the Onn's CPU/RAM;
+  one shared dead-list for every device on the LAN.
+- **Known tradeoff:** Onn is a brick if the PC is off. Accepted for v1.
+- **Fast-follow (not now):** Option 3 hybrid — fall back to direct mode for
+  favorites when the server is unreachable.
+
+### Connection flow
+1. APK boots → tries saved server URL (`http://<ip>:8484`).
+2. First run / failure → a simple **server setup screen** (enter IP/hostname,
+   test connection, save to device storage).
+3. Success → loads the UI in immersive mode; D-pad drives the existing keys.
 
 ## Plan
 

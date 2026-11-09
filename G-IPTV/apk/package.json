@@ -1,0 +1,19 @@
+{
+  "name": "giptv",
+  "version": "0.1.0",
+  "description": "G-IPTV — LAN IPTV thin client (Onn 4K / Android TV)",
+  "private": true,
+  "scripts": {
+    "build:ui": "node scripts/copy-ui.js",
+    "cap:sync": "npm run build:ui && npx cap sync",
+    "apk": "npm run cap:sync && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
+    "typescript": "^7.0.2"
+  }
+}

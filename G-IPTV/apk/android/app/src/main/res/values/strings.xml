@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">G-IPTV</string>
+    <string name="title_activity_main">G-IPTV</string>
+    <string name="package_name">com.giptv.app</string>
+    <string name="custom_url_scheme">com.giptv.app</string>
+</resources>
