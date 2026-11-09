@@ -32,8 +32,9 @@ UI_FILE = Path(__file__).resolve().parent.parent / "mockups" / "stage12.html"
 
 PLAYLIST_CACHE_TTL = 3600          # re-pull upstream at most hourly
 EPG_CACHE_TTL = 6 * 3600           # guide refresh twice a day is plenty
-CURATE_CONCURRENCY = 60            # server has no browser connection caps
+CURATE_CONCURRENCY = 24            # kept modest: RAM-tight machines
 CURATE_TIMEOUT = 8.0
+PROBE_MAX_BYTES = 8192             # probe reads only the head of a response
 
 app = FastAPI(title="G-IPTV")
 
@@ -212,93 +213,6 @@ def _res_tag(name: str):
     return m.group(1).upper().replace(" ", "") if m else None
 
 
-@app.get("/api/curate")
-async def api_curate(category: str = Query("ALL"), res: str = Query("__ALL__")):
-    """Server-side availability scan. Accurate: no browser CORS sandbox."""
-    await refresh_playlist()
-    targets = _channels
-    if category not in ("ALL", "FAVES", "DEAD"):
-        targets = [c for c in targets if (c["group"] or "Undefined") == category]
-    if res != "__ALL__":
-        targets = [c for c in targets if _res_tag(c["name"]) == res]
-
-    sem = asyncio.Semaphore(CURATE_CONCURRENCY)
-    results: dict[int, bool] = {}
-
-    async def probe(ch):
-        """Deep probe: fetch the URL AND verify it's actually playable.
-
-        A plain HTTP 200 isn't enough — streams that return HTML error
-        pages, empty bodies, dead variants, or non-media content all pass
-        a header check but then fail in the player with 'no supported
-        source'. So we validate the manifest/segment like hls.js does:
-          - .m3u8: body must start with #EXTM3U; if it's a master playlist
-            (lists #EXT-X-STREAM-INF variants) fetch the first variant and
-            confirm THAT is a valid media playlist with segments
-          - everything else: must return real bytes with a media-ish
-            content-type
-        """
-        url = ch["url"]
-        async with sem:
-            try:
-                r = await client.get(url, timeout=CURATE_TIMEOUT)
-                if r.status_code not in (200, 206):
-                    results[ch["num"]] = False
-                    return
-
-                ctype = (r.headers.get("content-type") or "").lower()
-                body = r.content or b""
-
-                if ".m3u8" in url.lower() or "mpegurl" in ctype:
-                    text = body.decode("utf-8", "replace")
-                    if "#EXTM3U" not in text[:64]:
-                        results[ch["num"]] = False
-                        return
-                    if "#EXT-X-STREAM-INF" in text:
-                        # master playlist -> resolve first variant, probe it
-                        variant = next(
-                            (ln.strip() for ln in text.splitlines()
-                             if ln.strip() and not ln.startswith("#")),
-                            None)
-                        if not variant:
-                            results[ch["num"]] = False
-                            return
-                        vurl = urljoin(url, variant)
-                        vr = await client.get(vurl, timeout=CURATE_TIMEOUT)
-                        if vr.status_code != 200:
-                            results[ch["num"]] = False
-                            return
-                        vtext = vr.content.decode("utf-8", "replace")
-                        # media playlist must carry at least one segment
-                        if "#EXTM3U" not in vtext[:64] or "#EXTINF" not in vtext:
-                            results[ch["num"]] = False
-                            return
-                    elif "#EXTINF" not in text:
-                        results[ch["num"]] = False
-                        return
-                    results[ch["num"]] = True
-                    return
-
-                # non-HLS: needs actual bytes + a plausible media type
-                if not body:
-                    results[ch["num"]] = False
-                    return
-                if ctype.startswith("text/html") and b"<html" in body[:512].lower():
-                    results[ch["num"]] = False
-                    return
-                results[ch["num"]] = True
-            except Exception:
-                results[ch["num"]] = False
-
-    await asyncio.gather(*(probe(c) for c in targets))
-    return JSONResponse({
-        "scanned": len(targets),
-        "alive": sorted(n for n, ok in results.items() if ok),
-        "dead": sorted(n for n, ok in results.items() if not ok),
-        "ts": int(time.time()),
-    })
-
-
 # ---------------------------------------------------------------- curate job
 # Curate runs as a BACKGROUND JOB so the UI can poll live progress instead
 # of blocking on one long HTTP request.
@@ -365,15 +279,27 @@ async def _run_curate(targets):
     _curate_job["ts"] = int(time.time())
 
 
+async def _get_head(url: str, limit: int = PROBE_MAX_BYTES) -> tuple[int, str, bytes]:
+    """GET only the first `limit` bytes of a response (streaming).
+    Keeps curate probes from buffering whole manifests/segments in RAM."""
+    async with client.stream("GET", url, timeout=CURATE_TIMEOUT) as r:
+        ctype = (r.headers.get("content-type") or "").lower()
+        buf = bytearray()
+        async for chunk in r.aiter_bytes(4096):
+            buf.extend(chunk)
+            if len(buf) >= limit:
+                break
+        return r.status_code, ctype, bytes(buf[:limit])
+
+
 async def _probe_channel(ch) -> bool:
-    """Deep probe: fetch the URL AND verify it's actually playable."""
+    """Deep probe: fetch the URL AND verify it's actually playable,
+    reading only the first few KB of each response."""
     url = ch["url"]
     try:
-        r = await client.get(url, timeout=CURATE_TIMEOUT)
-        if r.status_code not in (200, 206):
+        status, ctype, body = await _get_head(url)
+        if status not in (200, 206):
             return False
-        ctype = (r.headers.get("content-type") or "").lower()
-        body = r.content or b""
         if ".m3u8" in url.lower() or "mpegurl" in ctype:
             text = body.decode("utf-8", "replace")
             if "#EXTM3U" not in text[:64]:
@@ -383,10 +309,10 @@ async def _probe_channel(ch) -> bool:
                                 if ln.strip() and not ln.startswith("#")), None)
                 if not variant:
                     return False
-                vr = await client.get(urljoin(url, variant), timeout=CURATE_TIMEOUT)
-                if vr.status_code != 200:
+                vstatus, _vct, vbody = await _get_head(urljoin(url, variant))
+                if vstatus != 200:
                     return False
-                vtext = vr.content.decode("utf-8", "replace")
+                vtext = vbody.decode("utf-8", "replace")
                 if "#EXTM3U" not in vtext[:64] or "#EXTINF" not in vtext:
                     return False
             elif "#EXTINF" not in text:
@@ -426,37 +352,39 @@ async def stream(request: Request, url: str = Query(...)):
     if "range" in request.headers:
         upstream_headers["Range"] = request.headers["range"]
 
-    ctype_hint = ""
-    r = await client.get(url, headers=upstream_headers, timeout=30)
-    ctype_hint = (r.headers.get("content-type") or "").lower()
-
-    looks_hls = (".m3u8" in url.lower()) or ("mpegurl" in ctype_hint)
-    if looks_hls and r.status_code in (200, 206):
-        text = r.content.decode("utf-8", "replace")
-        out_lines = []
-        for ln in text.splitlines():
-            s = ln.strip()
-            if s.startswith("#"):
-                # rewrite URI="..." attributes (keys, audio, subtitles…)
-                ln = re.sub(
-                    r'URI="([^"]+)"',
-                    lambda m: 'URI="/stream?url=%s"' %
-                              __import__("urllib.parse").parse.quote(
-                                  urljoin(url, m.group(1)), safe=""),
-                    ln)
-                out_lines.append(ln)
-            elif s:
-                out_lines.append("/stream?url=" + __import__("urllib.parse")
-                                 .parse.quote(urljoin(url, s), safe=""))
-            else:
-                out_lines.append(ln)
-        body = "\n".join(out_lines)
-        return PlainTextResponse(
-            body,
-            status_code=r.status_code,
-            media_type="application/vnd.apple.mpegurl",
-            headers={"Access-Control-Allow-Origin": "*"},
-        )
+    # HLS manifests are small text files — read fully and rewrite.
+    # Everything else streams through untouched (no buffering).
+    looks_hls = ".m3u8" in url.lower()
+    if looks_hls:
+        r = await client.get(url, headers=upstream_headers, timeout=30)
+        ctype = (r.headers.get("content-type") or "").lower()
+        if r.status_code in (200, 206) and \
+           ("mpegurl" in ctype or r.content.lstrip()[:7] == b"#EXTM3U"):
+            text = r.content.decode("utf-8", "replace")
+            out_lines = []
+            for ln in text.splitlines():
+                s = ln.strip()
+                if s.startswith("#"):
+                    ln = re.sub(
+                        r'URI="([^"]+)"',
+                        lambda m: 'URI="/stream?url=%s"' %
+                                  __import__("urllib.parse").parse.quote(
+                                      urljoin(url, m.group(1)), safe=""),
+                        ln)
+                    out_lines.append(ln)
+                elif s:
+                    out_lines.append("/stream?url=" + __import__("urllib.parse")
+                                     .parse.quote(urljoin(url, s), safe=""))
+                else:
+                    out_lines.append(ln)
+            body = "\n".join(out_lines)
+            return PlainTextResponse(
+                body,
+                status_code=r.status_code,
+                media_type="application/vnd.apple.mpegurl",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+        # not really HLS despite the extension — fall through to streaming
 
     # non-HLS (or failed manifest): stream the body through untouched
     req = client.build_request("GET", url, headers=upstream_headers)
