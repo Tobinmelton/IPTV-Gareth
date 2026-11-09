@@ -2,14 +2,20 @@
 
 **In-house IPTV server with a curated channel list.** Private, LAN-only. No cloud, no subscriptions.
 
+> **Direction update (2026-11-09):** TV-browser delivery (Xbox Edge, Roku browser)
+> is **abandoned** — those browsers kill long-lived local requests and offer no
+> workable remote navigation. Targets are now **PC/PC-browser on the LAN** and a
+> **sideloaded APK on the Onn 4K (Android TV)**. See [PLAN.md](PLAN.md) for the
+> full plan/spec and the fullscreen work that shipped with this change.
+
 ---
 
 ## 1. Vision
 
 A personal "cable company" for one household: a small curated list of channels
 (home movies, digitized tapes, house cameras, downloaded media) served over the
-local network, watchable on Roku, Xbox, Google TV, phones, and browsers — with a
-retro-2000s TV-guide interface.
+local network, watchable on a PC browser and Android-TV devices via a sideloaded
+app — with a retro-2000s TV-guide interface.
 
 ## 2. Step 1 — Framework (current phase)
 

@@ -295,6 +295,24 @@
     padding:18px; font-size:17px; color:#9fc0ff; text-align:center;
   }
   .guide .status.err { color:#ff8a7a; }
+
+  /* ---- fullscreen : VIDEO ONLY — the TV panel fills the screen ---- */
+  .tvwrap:fullscreen {
+    background:#000; display:flex; align-items:center; justify-content:center;
+    padding:0; margin:0;
+  }
+  .tvwrap:fullscreen .tv {
+    height:100vh; max-height:100vh; border-radius:0; padding:10px;
+    box-shadow:none;
+  }
+  .tvwrap:fullscreen .tv .brandplate,
+  .tvwrap:fullscreen .tv .led { display:none; }   /* bare screen in fullscreen */
+  .fsbtn {
+    flex:0 0 auto; padding:7px 16px; border-radius:8px; cursor:pointer;
+    font-size:14px; font-weight:bold; letter-spacing:1px;
+    color:#c9d8ff; background:#0a1440; border:2px solid #5c7fe0;
+  }
+  .fsbtn:hover { border-color:#ffd94d; color:#ffd94d; }
 </style>
 </head>
 <body>
@@ -314,6 +332,7 @@
     <span class="gselwrap"><select class="gsel" id="gsel"></select></span>
     <span class="clabel">RES ▸</span>
     <span class="rselwrap"><select class="rsel" id="rsel"></select></span>
+    <button class="fsbtn" id="fsBtn" title="Fullscreen (F)">⛶ FULLSCREEN</button>
     <span class="scaninfo" id="scanInfo"></span>
   </div>
 
@@ -334,13 +353,13 @@
     </section>
 
     <!-- TOP-RIGHT : retro TV, fills its panel -->
-    <div class="tvwrap">
+    <div class="tvwrap" id="tvwrap">
       <div class="tv">
         <div class="screen">
           <video id="player" muted playsinline></video>
           <div class="overlay" id="overlay">
             <div class="big">G-IPTV</div>
-            <div class="small">▲▼ SELECT · CLICK / ENTER TO TUNE · F = FAVORITE</div>
+            <div class="small">▲▼ SELECT · CLICK / ENTER TO TUNE · F = FAVORITE · ⛶ = FULLSCREEN</div>
           </div>
           <div class="scanlines"></div>
           <div class="vignette"></div>
@@ -765,7 +784,7 @@
       osd.textContent = '';
       overlay.className = 'overlay';
       overlay.innerHTML = `<div class="big">G-IPTV</div>
-        <div class="small">▲▼ SELECT · CLICK / ENTER TO TUNE · F = FAVORITE</div>`;
+        <div class="small">▲▼ SELECT · CLICK / ENTER TO TUNE · F = FAVORITE · ⛶ = FULLSCREEN</div>`;
       overlay.classList.remove('hidden');
     }
 
@@ -950,6 +969,22 @@
       else endCurate();
     });
 
+    /* ================= FULLSCREEN (video only) ================= */
+    const fsBtn = document.getElementById('fsBtn');
+    const tvwrap = document.getElementById('tvwrap');
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        tvwrap.requestFullscreen?.().catch(()=>{});
+      } else {
+        document.exitFullscreen?.().catch(()=>{});
+      }
+    }
+    fsBtn.addEventListener('click', toggleFullscreen);
+    document.addEventListener('fullscreenchange', () => {
+      const on = document.fullscreenElement === tvwrap;
+      fsBtn.textContent = on ? '⛶ EXIT FS' : '⛶ FULLSCREEN';
+    });
+
     /* ================= KEYBOARD / REMOTE ================= */
     document.addEventListener('keydown', (e) => {
       if (curating) {
@@ -968,6 +1003,7 @@
       else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tune(selectedIdx); }
       else if (e.key === 'f' || e.key === 'F')     { e.preventDefault(); toggleFavorite(); }
       else if (e.key === 'c' || e.key === 'C')     { e.preventDefault(); curate(); }
+      else if (e.key === 'u' || e.key === 'U')     { e.preventDefault(); toggleFullscreen(); }
     });
 
     /* ================= BOOT ================= */
