@@ -1,4 +1,5 @@
 __pycache__/
 *.pyc
 G-IPTV/server/.venv/
+G-IPTV/server/logs/
 node_modules/

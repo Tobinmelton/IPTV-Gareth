@@ -12,10 +12,12 @@ import asyncio
 import calendar
 import gzip
 import io
+import logging
 import os
 import re
 import time
 import xml.etree.ElementTree as ET
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -44,6 +46,34 @@ EPG_PAST_WINDOW = 2 * 3600         # keep programmes ending up to 2 h ago
 EPG_FUTURE_WINDOW = 48 * 3600      # … and starting up to 48 h ahead
 
 app = FastAPI(title="G-IPTV")
+
+# ---------------------------------------------------------------- logging
+# Verbose rotating logs for diagnostics:
+#   logs/server.log — playlist/EPG refreshes, every curate probe + reason,
+#                     dead reports, stream-proxy failures
+#   logs/client.log — batched browser/APK events via POST /api/clientlog
+LOG_DIR = Path(__file__).resolve().parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+
+def _mk_logger(name: str, fname: str, echo: bool = False) -> logging.Logger:
+    lg = logging.getLogger(name)
+    lg.setLevel(logging.DEBUG)
+    fh = RotatingFileHandler(LOG_DIR / fname, maxBytes=8_000_000,
+                             backupCount=3, encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname).1s %(message)s"))
+    lg.addHandler(fh)
+    if echo:                              # mirror key events to the console
+        sh = logging.StreamHandler()
+        sh.setLevel(logging.INFO)
+        sh.setFormatter(logging.Formatter("%(message)s"))
+        lg.addHandler(sh)
+    lg.propagate = False
+    return lg
+
+
+log = _mk_logger("giptv", "server.log", echo=True)
+client_log = _mk_logger("giptv.client", "client.log")
 
 # ---------------------------------------------------------------- state
 _playlist_raw: str = ""
@@ -192,7 +222,7 @@ async def refresh_playlist(force: bool = False) -> None:
                     c["src"] = src["i"]
                 return chans
             except Exception as e:
-                print(f"[sources] {src['label']} failed: {e}")
+                log.warning(f"[sources] {src['label']} failed: {e!r}")
                 return []
 
         results = await asyncio.gather(*(fetch(s) for s in sources))
@@ -203,10 +233,12 @@ async def refresh_playlist(force: bool = False) -> None:
         _sources = sources
         _playlist_raw = ""               # raw merged view not kept (saves RAM)
         _playlist_fetched = time.time()
+        counts = ", ".join(f"{s['label']}={len(r)}" for s, r in zip(sources, results))
+        log.info(f"[playlist] refreshed: {len(merged)} channels ({counts})")
     except Exception as e:
         # never take the server down over a transient upstream failure;
         # keep serving the previous snapshot if we have one
-        print(f"[playlist] refresh failed: {e}")
+        log.error(f"[playlist] refresh failed: {e!r}")
         if not _channels:
             raise            # only fatal on cold start with no cache
 
@@ -294,7 +326,7 @@ async def refresh_epg(force: bool = False) -> None:
                 feed(raw)
                 del raw
             except Exception as e:                   # never take the server down
-                print(f"[epg] {url} failed: {e}")
+                log.warning(f"[epg] {url} failed: {e!r}")
 
         if epg:
             for lst in epg.values():
@@ -302,7 +334,7 @@ async def refresh_epg(force: bool = False) -> None:
             _epg = epg
             _epg_alias = alias
             _epg_fetched = time.time()
-            print(f"[epg] {len(epg)} channels matched from {len(urls)} source(s)")
+            log.info(f"[epg] {len(epg)} channels matched from {len(urls)} source(s)")
 
 
 # ---------------------------------------------------------------- lifespan
@@ -441,6 +473,9 @@ async def curate_start(category: str = Query("ALL"), res: str = Query("__ALL__")
     })
     _curate_cancel = asyncio.Event()
     _curate_task = asyncio.create_task(_run_curate(targets))
+    log.info(f"[curate] start: category={category} res={res} src={src} "
+             f"targets={len(targets)} concurrency={CURATE_CONCURRENCY} "
+             f"timeout={CURATE_TIMEOUT}s")
     return {"ok": True, "total": len(targets)}
 
 
@@ -455,9 +490,13 @@ async def _run_curate(targets):
             if _curate_cancel.is_set():
                 return
             _curate_job["current"] = ch["name"]
-            ok = await _probe_channel(ch)
+            t0 = time.monotonic()
+            ok, reason = await _probe_channel(ch)
+            ms = int((time.monotonic() - t0) * 1000)
             if _curate_cancel.is_set():
                 return
+            log.info(f"[probe] {'ALIVE' if ok else 'DEAD '} #{ch['num']:>5} "
+                     f"{ch['name'][:48]!r} | {reason} | {ms}ms | {ch['url'][:120]}")
             _curate_job["done"] += 1
             if ok:
                 _curate_job["alive"] += 1
@@ -471,6 +510,10 @@ async def _run_curate(targets):
     _curate_job["finished"] = True
     _curate_job["stopped"] = _curate_cancel.is_set()
     _curate_job["ts"] = int(time.time())
+    log.info(f"[curate] finished: done={_curate_job['done']}/{_curate_job['total']} "
+             f"alive={_curate_job['alive']} dead={_curate_job['dead']} "
+             f"stopped={_curate_job['stopped']} "
+             f"elapsed={time.time() - _curate_job['started']:.0f}s")
 
 
 async def _get_head(url: str, limit: int = PROBE_MAX_BYTES) -> tuple[int, str, bytes]:
@@ -486,39 +529,41 @@ async def _get_head(url: str, limit: int = PROBE_MAX_BYTES) -> tuple[int, str, b
         return r.status_code, ctype, bytes(buf[:limit])
 
 
-async def _probe_channel(ch) -> bool:
+async def _probe_channel(ch) -> tuple[bool, str]:
     """Deep probe: fetch the URL AND verify it's actually playable,
-    reading only the first few KB of each response."""
+    reading only the first few KB of each response.
+    Returns (alive, reason) — the reason lands in server.log."""
     url = ch["url"]
     try:
         status, ctype, body = await _get_head(url)
         if status not in (200, 206):
-            return False
+            return False, f"http {status}"
         if ".m3u8" in url.lower() or "mpegurl" in ctype:
             text = body.decode("utf-8", "replace")
             if "#EXTM3U" not in text[:64]:
-                return False
+                return False, "no #EXTM3U header"
             if "#EXT-X-STREAM-INF" in text:
                 variant = next((ln.strip() for ln in text.splitlines()
                                 if ln.strip() and not ln.startswith("#")), None)
                 if not variant:
-                    return False
+                    return False, "master playlist w/o variant uri"
                 vstatus, _vct, vbody = await _get_head(urljoin(url, variant))
                 if vstatus != 200:
-                    return False
+                    return False, f"variant http {vstatus}"
                 vtext = vbody.decode("utf-8", "replace")
                 if "#EXTM3U" not in vtext[:64] or "#EXTINF" not in vtext:
-                    return False
+                    return False, "variant not a media playlist"
+                return True, "ok (master+variant)"
             elif "#EXTINF" not in text:
-                return False
-            return True
+                return False, "playlist w/o #EXTINF"
+            return True, "ok (media playlist)"
         if not body:
-            return False
+            return False, "empty body"
         if ctype.startswith("text/html") and b"<html" in body[:512].lower():
-            return False
-        return True
-    except Exception:
-        return False
+            return False, "html page, not a stream"
+        return True, f"ok ({ctype or 'no content-type'})"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:120]}"
 
 
 @app.get("/api/curate/status")
@@ -545,6 +590,10 @@ async def report_dead(request: Request):
     body = await request.json()
     num = int(body.get("num", 0))
     if num:
+        name = next((c["name"] for c in _channels if c["num"] == num), "?")
+        ip = request.client.host if request.client else "?"
+        log.info(f"[dead-report] #{num} {name!r} reported by {ip} "
+                 f"(total reported={len(_dead_reported) + 1})")
         _dead_reported.add(num)
         _curate_job["dead_nums"] = sorted(set(_curate_job["dead_nums"]) | {num})
     return {"ok": True, "reported_dead": len(_dead_reported)}
@@ -553,6 +602,19 @@ async def report_dead(request: Request):
 @app.get("/api/dead")
 async def list_dead():
     return JSONResponse(sorted(_dead_reported))
+
+
+@app.post("/api/clientlog")
+async def clientlog(request: Request):
+    """Batched verbose log lines from the UI (browser or APK WebView)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": False}
+    ip = request.client.host if request.client else "?"
+    for line in (body.get("lines") or [])[:300]:
+        client_log.info(f"[{ip}] {str(line)[:600]}")
+    return {"ok": True}
 
 
 @app.get("/stream", include_in_schema=False)
@@ -574,6 +636,8 @@ async def stream(request: Request, url: str = Query(...)):
     if looks_hls:
         r = await client.get(url, headers=upstream_headers, timeout=30)
         ctype = (r.headers.get("content-type") or "").lower()
+        if r.status_code >= 400:
+            log.warning(f"[stream] manifest http {r.status_code} for {url[:160]}")
         if r.status_code in (200, 206) and \
            ("mpegurl" in ctype or r.content.lstrip()[:7] == b"#EXTM3U"):
             text = r.content.decode("utf-8", "replace")
@@ -605,6 +669,8 @@ async def stream(request: Request, url: str = Query(...)):
     # non-HLS (or failed manifest): stream the body through untouched
     req = client.build_request("GET", url, headers=upstream_headers)
     upstream = await client.send(req, stream=True)
+    if upstream.status_code >= 400:
+        log.warning(f"[stream] upstream http {upstream.status_code} for {url[:160]}")
 
     hop = {"connection", "keep-alive", "transfer-encoding", "content-encoding",
            "content-length", "te", "trailer", "upgrade"}
@@ -625,12 +691,6 @@ async def stream(request: Request, url: str = Query(...)):
         headers=out_headers,
         media_type=upstream.headers.get("content-type"),
     )
-
-
-# ---------------------------------------------------------------- main
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
 
 
 # ---------------------------------------------------------------- main

@@ -416,6 +416,35 @@
     const RES_ALL = "__ALL__";
     const SRC_ALL = -1;
 
+    /* ================= VERBOSE CLIENT LOGGING =================
+       Every notable UI event is logged to the console AND batched to
+       POST /api/clientlog, which lands in server/logs/client.log —
+       so APK (WebView) sessions can be analyzed on the server too. */
+    const LOG_BUF = [];
+    function clog(...args) {
+      const line = args.map(a =>
+        (a && typeof a === 'object') ? JSON.stringify(a) : String(a)).join(' ');
+      console.log('[giptv]', line);
+      LOG_BUF.push(new Date().toISOString() + ' ' + line);
+      if (LOG_BUF.length >= 25) flushClog();
+    }
+    function flushClog() {
+      if (!LOG_BUF.length) return;
+      const lines = LOG_BUF.splice(0);
+      fetch('/api/clientlog', { method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ lines }) }).catch(()=>{});
+    }
+    setInterval(flushClog, 5000);
+    window.addEventListener('pagehide', () => {
+      if (LOG_BUF.length && navigator.sendBeacon)
+        navigator.sendBeacon('/api/clientlog',
+          new Blob([JSON.stringify({ lines: LOG_BUF.splice(0) })],
+                   { type:'application/json' }));
+    });
+    window.addEventListener('error', e =>
+      clog(`js-error: ${e.message} @${e.filename}:${e.lineno}`));
+
     /* ================= STATE ================= */
     let allChannels = [];
     let channels = [];
@@ -485,7 +514,9 @@
        A channel can pass curate (manifest 200) yet still be unplayable —
        geo-blocks often 403 the SEGMENTS at play time. When the player
        fails, report it to the server and treat it as dead locally. */
-    function markDead(ch) {
+    function markDead(ch, why) {
+      clog(`markDead #${ch.num} ${ch.name} | ${why || 'unspecified'}` +
+           (deadSet.has(ch.num) ? ' (already dead)' : ''));
       if (deadSet.has(ch.num)) return;
       deadSet.add(ch.num);
       aliveSet.delete(ch.num);
@@ -815,6 +846,7 @@
       const proxied = streamUrl(ch.url);
       const isHlsUrl = /\.m3u8?(\?|$)/i.test(ch.url);
       const nativeHls = player.canPlayType('application/vnd.apple.mpegurl');
+      clog(`tune #${ch.num} ${ch.name} | hlsUrl=${isHlsUrl} nativeHls=${!!nativeHls} | ${ch.url.slice(0,120)}`);
 
       const tryHlsJs = () => {
         if (!window.Hls) {
@@ -829,8 +861,13 @@
           player.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (_e, d) => {
-          if (seq !== tuneSeq || !d.fatal) return;
-          markDead(ch);
+          if (seq !== tuneSeq) return;
+          if (!d.fatal) {
+            clog(`hls non-fatal #${ch.num} ${d.type}/${d.details}`);
+            return;
+          }
+          markDead(ch, `hls fatal ${d.type}/${d.details}` +
+            (d.response ? ` http=${d.response.code}` : ''));
           showNoSignal(ch, `Stream error (${d.type}): ${d.details}`);
         });
       };
@@ -838,7 +875,7 @@
       const tryDirect = () => {
         player.src = proxied;
         player.play().catch(err => {
-          if (seq === tuneSeq) { markDead(ch); showNoSignal(ch, `Player refused to start: ${err.message}`); }
+          if (seq === tuneSeq) { markDead(ch, `player.play() rejected: ${err.name}: ${err.message}`); showNoSignal(ch, `Player refused to start: ${err.message}`); }
         });
       };
 
@@ -848,13 +885,15 @@
     }
 
     player.addEventListener('playing', () => {
+      clog(`playing #${tunedNum} — stream is up`);
       hideOverlay();
       if (player.muted) player.muted = false;
     });
     player.addEventListener('error', () => {
       if (tunedNum < 0) return;
       const ch = channels.find(c => c.num === tunedNum);
-      if (ch) { markDead(ch); showNoSignal(ch, 'The stream could not be decoded or reached.'); }
+      const me = player.error;
+      if (ch) { markDead(ch, `video element error code=${me?.code} msg=${me?.message || '-'}`); showNoSignal(ch, 'The stream could not be decoded or reached.'); }
     });
 
     if (window.Hls) hlsReady = true;
@@ -900,6 +939,7 @@
 
       const g = groups[activeGroup];
       const qs = `?category=${encodeURIComponent(g.name)}&res=${encodeURIComponent(activeRes)}&src=${activeSource}`;
+      clog(`curate start: group=${g.name} res=${activeRes} src=${activeSource} | pre: alive=${aliveSet.size} dead=${deadSet.size}`);
 
       fetch("/api/curate/start" + qs, { method: "POST" })
         .then(r => r.json())
@@ -943,10 +983,13 @@
 
       if (!j.running && j.finished) {
         clearInterval(pollTimer);
+        const preAlive = aliveSet.size, preDead = deadSet.size;
         for (const n of j.alive_nums) { aliveSet.add(n); deadSet.delete(n); }
         for (const n of j.dead_nums)  { deadSet.add(n);  aliveSet.delete(n); }
         lastScanTs = j.ts * 1000;
         saveCuration();
+        clog(`curate merged: scan alive=${j.alive_nums.length} dead=${j.dead_nums.length} stopped=${j.stopped}` +
+             ` | sets ${preAlive}/${preDead} -> ${aliveSet.size}/${deadSet.size} (alive/dead)`);
 
         curPct.textContent = '100%';
         curFill.style.width = '100%';
@@ -1018,11 +1061,14 @@
     (async () => {
       loadFavorites();
       loadCuration();
+      clog(`boot: restored from localStorage — alive=${aliveSet.size} dead=${deadSet.size}` +
+           ` favorites=${favorites.size} lastScan=${lastScanTs ? new Date(lastScanTs).toISOString() : 'never'}`);
       try {
         const res = await fetch(API_CHANNELS);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         allChannels = await res.json();
         if (!allChannels.length) throw new Error('server returned 0 channels');
+        clog(`boot: ${allChannels.length} channels loaded from server`);
         // sources list for the SOURCE drop-down
         try {
           const sres = await fetch(API_SOURCES);
@@ -1033,6 +1079,8 @@
           const dres = await fetch("/api/dead");
           if (dres.ok) {
             const reported = await dres.json();
+            clog(`boot: /api/dead applied ${reported.length} server-reported dead nums` +
+                 (reported.length ? ` [${reported.slice(0, 20).join(',')}${reported.length > 20 ? ',…' : ''}]` : ''));
             for (const n of reported) { deadSet.add(n); aliveSet.delete(n); }
             if (reported.length) saveCuration();
           }
@@ -1048,6 +1096,7 @@
             const data = await gres.json();
             if (!Object.keys(data).length) return;
             guideData = data;
+            clog(`guide: ${Object.keys(data).length} entries refreshed`);
             renderGuide();
             if (selectedIdx >= 0) select(selectedIdx, false);
           } catch { /* no guide configured — fine */ }
