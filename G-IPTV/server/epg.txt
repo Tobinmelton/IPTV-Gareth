@@ -1,0 +1,16 @@
+# G-IPTV EPG sources — one XMLTV URL (or local file path) per line.
+# Lines starting with # are comments and ignored. Blank lines ignored.
+# .gz files are decompressed automatically. Optional label after a pipe.
+#
+# Channel matching is fuzzy (name-based), so the EPG ids don't have to
+# equal the playlist tvg-ids — pick guides covering the channels you watch.
+# Only programmes for channels present in the playlist are kept in RAM.
+#
+# Free XMLTV dumps (updated daily): https://epgshare01.online/epgshare01/
+
+https://epgshare01.online/epgshare01/epg_ripper_US2.xml.gz | US (epgshare01)
+
+# More examples:
+# https://epgshare01.online/epgshare01/epg_ripper_US_LOCALS1.xml.gz | US locals
+# https://epgshare01.online/epgshare01/epg_ripper_US_SPORTS1.xml.gz | US sports
+# https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz | UK

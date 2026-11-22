@@ -700,13 +700,19 @@
     }
 
     /* ================= GUIDE RENDER ================= */
+    function gfor(ch) {                 // guide entry: tvg-id key, num fallback
+      return guideData[ch.id] || guideData['num:' + ch.num];
+    }
+    function fmtT(ts) {
+      return new Date(ts * 1000).toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+    }
     function guideCells(ch, dead) {
-      const g = guideData[ch.id];
+      const g = gfor(ch);
       if (dead) return `<div class="cell">⚫</div><div class="cell">⚫</div><div class="cell">⚫</div><div class="cell">⚫ DEAD</div>`;
       if (g) return `
         <div class="cell">${esc(g.now || '● LIVE')}</div>
         <div class="cell">${esc(g.next || '—')}</div>
-        <div class="cell">—</div>
+        <div class="cell">${esc(g.later || '—')}</div>
         <div class="cell">${aliveSet.has(ch.num) ? '🟢' : '● LIVE'}</div>`;
       return `<div class="cell">● LIVE</div><div class="cell">● LIVE</div>
               <div class="cell">● LIVE</div><div class="cell">${aliveSet.has(ch.num) ? '🟢' : '● LIVE'}</div>`;
@@ -747,14 +753,16 @@
       const fav = favorites.has(ch.num);
       const dead = deadSet.has(ch.num);
       const res = resTagOf(ch.name);
-      const g = guideData[ch.id];
+      const g = gfor(ch);
       document.getElementById('infoNum').textContent   = 'CH ' + String(ch.num).padStart(3,'0');
       document.getElementById('infoGroup').textContent = (ch.group || 'UNDEFINED').toUpperCase();
       document.getElementById('infoTitle').textContent = g?.now || ch.name;
       document.getElementById('infoMeta').innerHTML =
         `<span>${esc(ch.name)}</span><span>•</span><span>${esc(ch.id || 'no tvg-id')}</span>`;
       document.getElementById('infoDesc').textContent =
-        (g ? `Now: ${g.now || '—'} · Next: ${g.next || '—'}. ` : '') +
+        (g ? `Now: ${g.now || '—'}${g.now_start ? ` (${fmtT(g.now_start)}–${fmtT(g.now_stop)})` : ''}` +
+             ` · Next: ${g.next || '—'}${g.next_start ? ` (${fmtT(g.next_start)})` : ''}. `
+           : '') +
         `${ch.name} — ${ch.group || 'undefined'} channel.` +
         (dead ? ' Last scan marked this stream unreachable.' : '');
       document.getElementById('infoBadges').innerHTML =
@@ -1031,14 +1039,21 @@
         } catch { /* older server — fine */ }
         buildGroups();
         setGroup(0);
-        // guide data is best-effort (requires GIPTV_EPG_URL on the server)
-        try {
-          const gres = await fetch(API_GUIDE);
-          if (gres.ok) {
-            guideData = await gres.json();
-            if (Object.keys(guideData).length) renderGuide();
-          }
-        } catch { /* no guide configured — fine */ }
+        // guide data is best-effort (requires an EPG source on the server);
+        // refresh periodically so NOW/NEXT roll over as programs end
+        async function refreshGuide() {
+          try {
+            const gres = await fetch(API_GUIDE);
+            if (!gres.ok) return;
+            const data = await gres.json();
+            if (!Object.keys(data).length) return;
+            guideData = data;
+            renderGuide();
+            if (selectedIdx >= 0) select(selectedIdx, false);
+          } catch { /* no guide configured — fine */ }
+        }
+        refreshGuide();
+        setInterval(refreshGuide, 5 * 60 * 1000);
       } catch (err) {
         console.error(err);
         srcLbl.textContent = 'SERVER UNAVAILABLE';

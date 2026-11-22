@@ -9,7 +9,9 @@ Then: http://<this-machine-ip>:8484 from any LAN device.
 """
 
 import asyncio
+import calendar
 import gzip
+import io
 import os
 import re
 import time
@@ -37,6 +39,9 @@ CURATE_TIMEOUT = 8.0
 PROBE_MAX_BYTES = 8192             # probe reads only the head of a response
 
 SOURCES_FILE = Path(__file__).resolve().parent / "sources.txt"
+EPG_FILE = Path(__file__).resolve().parent / "epg.txt"
+EPG_PAST_WINDOW = 2 * 3600         # keep programmes ending up to 2 h ago
+EPG_FUTURE_WINDOW = 48 * 3600      # … and starting up to 48 h ahead
 
 app = FastAPI(title="G-IPTV")
 
@@ -46,8 +51,11 @@ _playlist_fetched: float = 0.0
 _channels: list[dict] = []
 _sources: list[dict] = []          # [{i, label, url}]
 _epg_fetched: float = 0.0
-# tvg-id -> list of (start_epoch, stop_epoch, title)
+# epg channel id -> list of (start_epoch, stop_epoch, title)
 _epg: dict[str, list[tuple[int, int, str]]] = {}
+# normalized alias -> epg channel id (for fuzzy playlist↔EPG matching)
+_epg_alias: dict[str, str] = {}
+_epg_lock: asyncio.Lock = asyncio.Lock()
 
 # shared http client (created on startup, closed on shutdown)
 client: httpx.AsyncClient
@@ -87,14 +95,66 @@ def parse_m3u(text: str) -> list[dict]:
     return out
 
 
-_XMLTV_DATE = re.compile(r"(\d{14})")
+_XMLTV_DATE = re.compile(r"(\d{14})(?:\s*([+-]\d{4}))?")
 
 
 def _xmltv_epoch(s: str) -> int:
+    """XMLTV timestamp → epoch. Honors the ±hhmm offset; assumes UTC if absent."""
     m = _XMLTV_DATE.search(s or "")
     if not m:
         return 0
-    return int(time.mktime(time.strptime(m.group(1), "%Y%m%d%H%M%S")))
+    utc = calendar.timegm(time.strptime(m.group(1), "%Y%m%d%H%M%S"))
+    off = m.group(2)
+    if off:
+        sign = 1 if off[0] == "+" else -1
+        utc -= sign * (int(off[1:3]) * 3600 + int(off[3:5]) * 60)
+    return utc
+
+
+# --- fuzzy playlist↔EPG channel matching -----------------------------------
+# tvg-ids ("ESPN2.us@SD") and EPG ids ("ESPN2.HD.us2" / "ESPN2 HD") rarely
+# agree verbatim across free sources, so both sides are reduced to a
+# lowercase alphanumeric key with country/resolution decorations stripped.
+_PAREN_RE = re.compile(r"\([^)]*\)")
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+_RES_TAIL_RE = re.compile(r"(?:uhd|fhd|hd|sd|4k|2160p|1080p|720p|576p|480p)$")
+
+
+def _norm(s: str) -> str:
+    s = _PAREN_RE.sub("", (s or "").lower())
+    return _NON_ALNUM_RE.sub("", s)
+
+
+def _alias_keys(*names: str) -> set[str]:
+    """Normalized keys for a channel, with and without a resolution tail."""
+    keys: set[str] = set()
+    for n in names:
+        k = _norm(n)
+        if len(k) < 2:
+            continue
+        keys.add(k)
+        bare = _RES_TAIL_RE.sub("", k)
+        if len(bare) >= 2:
+            keys.add(bare)
+    return keys
+
+
+def _playlist_aliases(ch: dict) -> set[str]:
+    """Matching keys for one playlist channel (tvg-id base + display name)."""
+    names = [ch.get("name", "")]
+    tvg = (ch.get("id") or "").split("@")[0]          # drop @SD/@HD quality tag
+    if tvg:
+        parts = tvg.split(".")
+        # drop the trailing country token ("ESPN2.us" -> "ESPN2")
+        names.append(".".join(parts[:-1]) if len(parts) > 1 else tvg)
+    return _alias_keys(*names)
+
+
+def _epg_id_aliases(cid: str) -> set[str]:
+    """Matching keys for an XMLTV channel id ("ESPN2.HD.us2" -> espn2hd/espn2)."""
+    parts = cid.split(".")
+    base = ".".join(parts[:-1]) if len(parts) > 1 else cid
+    return _alias_keys(base, cid)
 
 
 def _read_sources() -> list[dict]:
@@ -151,43 +211,98 @@ async def refresh_playlist(force: bool = False) -> None:
             raise            # only fatal on cold start with no cache
 
 
-async def refresh_epg(force: bool = False) -> None:
-    """Load an XMLTV guide into {tvg_id: [(start, stop, title), ...]}."""
-    global _epg, _epg_fetched
-    if not EPG_URL:
-        return
-    if not force and time.time() - _epg_fetched < EPG_CACHE_TTL and _epg:
-        return
-    try:
-        if EPG_URL.startswith(("http://", "https://")):
-            r = await client.get(EPG_URL, timeout=60)
-            r.raise_for_status()
-            raw = r.content
-        else:
-            raw = Path(EPG_URL).read_bytes()
-        if EPG_URL.endswith(".gz"):
-            raw = gzip.decompress(raw)
-
-        epg: dict[str, list[tuple[int, int, str]]] = {}
-        # iterparse keeps memory sane on big guide files
-        for _event, prog in ET.iterparse(
-                __import__("io").BytesIO(raw), events=("end",)):
-            if prog.tag != "programme":
+def _read_epg_sources() -> list[str]:
+    """epg.txt — one XMLTV URL/path per line; GIPTV_EPG_URL as fallback."""
+    out: list[str] = []
+    if EPG_FILE.exists():
+        for raw in EPG_FILE.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
                 continue
-            cid = prog.get("channel", "")
-            start = _xmltv_epoch(prog.get("start", ""))
-            stop = _xmltv_epoch(prog.get("stop", ""))
-            title_el = prog.find("title")
-            title = (title_el.text or "").strip() if title_el is not None else ""
-            if cid and title:
-                epg.setdefault(cid, []).append((start, stop, title))
-            prog.clear()
-        for lst in epg.values():
-            lst.sort()
-        _epg = epg
-        _epg_fetched = time.time()
-    except Exception as e:                       # never take the server down
-        print(f"[epg] refresh failed: {e}")
+            url = line.split("|", 1)[0].strip()      # optional '| label'
+            if url:
+                out.append(url)
+    if not out and EPG_URL:
+        out.append(EPG_URL)
+    return out
+
+
+async def refresh_epg(force: bool = False) -> None:
+    """Load XMLTV guides, keeping only programmes for playlist channels
+    inside a small time window (RAM-tight machines)."""
+    global _epg, _epg_alias, _epg_fetched
+    async with _epg_lock:
+        if not force and time.time() - _epg_fetched < EPG_CACHE_TTL and _epg:
+            return
+        urls = _read_epg_sources()
+        if not urls:
+            return
+        await refresh_playlist()
+        wanted: set[str] = set()
+        for ch in _channels:
+            wanted |= _playlist_aliases(ch)
+
+        now = time.time()
+        lo, hi = now - EPG_PAST_WINDOW, now + EPG_FUTURE_WINDOW
+        epg: dict[str, list[tuple[int, int, str]]] = {}
+        alias: dict[str, str] = {}
+        kept: dict[str, bool] = {}       # epg cid -> matched a playlist channel
+
+        def feed(raw: bytes) -> None:
+            ctx = ET.iterparse(io.BytesIO(raw), events=("start", "end"))
+            _, root = next(ctx)
+            for event, el in ctx:
+                if event != "end":
+                    continue
+                if el.tag == "channel":
+                    cid = el.get("id", "")
+                    if cid and cid not in kept:
+                        keys = _epg_id_aliases(cid)
+                        for dn in el.iter("display-name"):
+                            keys |= _alias_keys(dn.text or "")
+                        if keys & wanted:
+                            kept[cid] = True
+                            for k in keys:
+                                alias.setdefault(k, cid)
+                        else:
+                            kept[cid] = False
+                elif el.tag == "programme":
+                    cid = el.get("channel", "")
+                    if kept.get(cid):
+                        start = _xmltv_epoch(el.get("start", ""))
+                        stop = _xmltv_epoch(el.get("stop", ""))
+                        if stop >= lo and start <= hi:
+                            t = el.find("title")
+                            title = (t.text or "").strip() if t is not None else ""
+                            if title:
+                                epg.setdefault(cid, []).append((start, stop, title))
+                else:
+                    continue
+                el.clear()
+                del root[:]              # keep iterparse memory flat
+
+        for url in urls:
+            try:
+                if url.startswith(("http://", "https://")):
+                    r = await client.get(url, timeout=120)
+                    r.raise_for_status()
+                    raw = r.content
+                else:
+                    raw = Path(url).read_bytes()
+                if url.endswith(".gz") or raw[:2] == b"\x1f\x8b":
+                    raw = gzip.decompress(raw)
+                feed(raw)
+                del raw
+            except Exception as e:                   # never take the server down
+                print(f"[epg] {url} failed: {e}")
+
+        if epg:
+            for lst in epg.values():
+                lst.sort()
+            _epg = epg
+            _epg_alias = alias
+            _epg_fetched = time.time()
+            print(f"[epg] {len(epg)} channels matched from {len(urls)} source(s)")
 
 
 # ---------------------------------------------------------------- lifespan
@@ -234,20 +349,50 @@ async def api_sources():
 
 @app.get("/api/guide")
 async def api_guide():
-    """Now/next program per channel tvg-id, if an EPG source is configured."""
+    """Now/next/later per channel, if an EPG source is configured.
+
+    Keys are the channel tvg-id when present, else "num:<channel number>".
+    """
     await refresh_epg()
     now = int(time.time())
     out: dict[str, dict] = {}
-    for cid, progs in _epg.items():
-        now_title = next_title = None
-        for start, stop, title in progs:
-            if start <= now < stop:
-                now_title = title
-            elif start > now and next_title is None:
-                next_title = title
-                break
-        if now_title or next_title:
-            out[cid] = {"now": now_title, "next": next_title}
+    for ch in _channels:
+        key = ch.get("id") or f"num:{ch['num']}"
+        if key in out:
+            continue
+        cid = None
+        tvg = ch.get("id", "")
+        if tvg and tvg in _epg:
+            cid = tvg
+        else:
+            for k in _playlist_aliases(ch):
+                cid = _epg_alias.get(k)
+                if cid:
+                    break
+        progs = _epg.get(cid) if cid else None
+        if not progs:
+            continue
+        now_p = None
+        upcoming: list[tuple[int, int, str]] = []
+        for p in progs:
+            if p[0] <= now < p[1]:
+                now_p = p
+            elif p[0] > now:
+                upcoming.append(p)
+                if len(upcoming) == 2:
+                    break
+        if not now_p and not upcoming:
+            continue
+        entry: dict = {
+            "now": now_p[2] if now_p else None,
+            "next": upcoming[0][2] if upcoming else None,
+            "later": upcoming[1][2] if len(upcoming) > 1 else None,
+        }
+        if now_p:
+            entry["now_start"], entry["now_stop"] = now_p[0], now_p[1]
+        if upcoming:
+            entry["next_start"] = upcoming[0][0]
+        out[key] = entry
     return JSONResponse(out)
 
 

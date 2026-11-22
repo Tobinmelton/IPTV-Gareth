@@ -11,7 +11,7 @@ mixed-content issues on the LAN.
 | `GET /` | the UI (stage12, server-adapted) |
 | `GET /playlist.m3u` | proxied + cached upstream M3U |
 | `GET /api/channels` | parsed channel list as JSON |
-| `GET /api/guide` | per-channel now/next program info (XMLTV-backed) |
+| `GET /api/guide` | per-channel now/next/later program info (XMLTV-backed) |
 | `GET /api/curate?category=X&res=Y` | server-side availability scan (accurate — no browser CORS) |
 | `GET /stream?url=...` | stream proxy (bypasses hotlink protection / CORS / mixed-content) |
 
@@ -74,5 +74,19 @@ Then open `http://<this-machine-ip>:8484` from any device on the LAN.
 - Dead channels sink to the bottom of the guide; favorited channels stay
   pinned at the top whether alive or not.
 
+## Guide data (EPG)
+
+`server/epg.txt` lists XMLTV guide URLs (or local file paths), one per line —
+same format as `sources.txt`. `.gz` files are decompressed automatically.
+The default points at a free daily US dump from
+[epgshare01](https://epgshare01.online/epgshare01/); swap/add files for the
+regions you watch.
+
+Channel matching is **fuzzy by name** (country/resolution decorations are
+stripped from both sides), so the XMLTV channel ids don't need to equal the
+playlist tvg-ids. To keep RAM low, only programmes for channels that exist
+in the playlist — within a −2 h…+48 h window — are kept; the guide refreshes
+every 6 h.
+
 Config via env vars: `GIPTV_PORT` (default 8484), `GIPTV_PLAYLIST_URL`,
-`GIPTV_EPG_URL` (XMLTV source, optional).
+`GIPTV_EPG_URL` (XMLTV source — fallback when `epg.txt` has no entries).

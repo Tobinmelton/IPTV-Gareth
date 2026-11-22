@@ -52,8 +52,13 @@ loads the UI from the G-IPTV server. The Onn 4K does no heavy work.
 - Number-pad direct channel entry.
 - Bigger hit targets on the control strip for D-pad.
 
-### Phase C — guide data
-- Point `GIPTV_EPG_URL` at an XMLTV source so NOW/NEXT show real programs.
+### Phase C — guide data (done)
+- `server/epg.txt` lists XMLTV sources (default: free epgshare01 US dump);
+  `GIPTV_EPG_URL` stays as a fallback.
+- Fuzzy name matching bridges playlist tvg-ids ↔ XMLTV channel ids; only
+  playlist channels within a −2 h…+48 h window are kept (RAM guard).
+- NOW/NEXT/LATER columns + program times in the info panel; the UI
+  re-fetches the guide every 5 min so programs roll over.
 
 ### Deferred / out
 - Xbox / Roku browser support — dropped.
@@ -73,4 +78,5 @@ loads the UI from the G-IPTV server. The Onn 4K does no heavy work.
 | Keys | ↑↓←→ · Enter · F · C · U · Esc |
 
 ## Env vars
-`GIPTV_PORT` · `GIPTV_PLAYLIST_URL` (fallback if sources.txt empty) · `GIPTV_EPG_URL`
+`GIPTV_PORT` · `GIPTV_PLAYLIST_URL` (fallback if sources.txt empty) ·
+`GIPTV_EPG_URL` (fallback if epg.txt empty)
